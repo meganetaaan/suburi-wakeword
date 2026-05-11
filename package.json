@@ -6,7 +6,9 @@
   "description": "Wake word training and voice collection pipeline for Stack-chan experiments.",
   "scripts": {
     "docs:check": "node scripts/check-docs.mjs",
-    "ci": "pnpm docs:check"
+    "pipeline:test": "cd training/pipeline && PYTHONPATH=src uv run python -m unittest discover -s tests -v",
+    "pipeline:smoke": "cd training/pipeline && PYTHONPATH=src uv run python -m suburi_wakeword.run_smoke_pipeline",
+    "ci": "pnpm docs:check && pnpm pipeline:test"
   },
   "devDependencies": {}
 }
