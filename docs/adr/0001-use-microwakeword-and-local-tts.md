@@ -16,9 +16,10 @@ Use **microWakeWord** as the first model-training approach and generate positive
 
 Initial TTS choice:
 
-1. Try Piper and `piper-sample-generator` first because it is already used in the microWakeWord ecosystem.
-2. If Japanese Piper voices are insufficient, evaluate Coqui TTS / Style-Bert-VITS2 / other local Japanese TTS engines for sample generation.
-3. Treat generated audio licensing as part of model release readiness.
+1. Use Piper and `piper-sample-generator` as the default local TTS stack because it is already used in the microWakeWord ecosystem and can run locally.
+2. Prefer Japanese Piper voices for the canonical Japanese phrase. The initial voice search should include community Japanese Piper voices such as Tsukuyomi-chan-derived examples, with license verification before use.
+3. If Japanese Piper voice quality is insufficient, evaluate Coqui TTS / Style-Bert-VITS2 / other local Japanese TTS engines for sample generation as secondary engines.
+4. Treat generated audio licensing as part of model release readiness.
 
 For ESP32-S3 integration, do not assume ESPHome runtime will be embedded directly. Prefer exporting `.tflite` and integrating via `esp-tflite-micro` or a small firmware-side adapter.
 

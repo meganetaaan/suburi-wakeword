@@ -27,14 +27,16 @@ models/
 
 ### Positive samples
 
-Phrase variants:
+Phrase variants are intentionally staged. The first model should focus on Japanese pronunciations only:
 
 - `ハイ、ｽﾀｯｸﾁｬﾝ`
 - `はい、ｽﾀｯｸﾁｬﾝ`
 - `ハイスタックチャン`
 - `ハイ、スタックちゃん`
 
-Keep the canonical model label as `hai_stackchan`.
+Keep the canonical model label as `hai_stackchan_ja`.
+
+English-like `Hi, Stack-chan` should initially be held out as evaluation data or hard-negative/near-miss data, not mixed into the first production candidate. After the Japanese-only baseline is measured, train a second mixed-language candidate (`hai_stackchan_ja_en`) and compare FAR/FRR against the Japanese-only model. Ship the mixed model only if it improves bilingual usability without increasing false accepts.
 
 ### Hard negative samples
 
@@ -51,14 +53,12 @@ Include phrases that should **not** wake the device:
 
 ## Local TTS plan
 
-1. Start with Piper + `piper-sample-generator`.
-2. Generate multiple speed and speaker variants.
-3. Resample all generated audio to 16 kHz mono WAV.
-4. If Piper Japanese voice quality is insufficient, create a comparison table for:
-   - Coqui TTS
-   - Style-Bert-VITS2
-   - VOICEVOX only if license and generated-output usage are acceptable for training
-5. Do not mix engines blindly; tag every sample with `source_engine`, `voice`, and `license_note`.
+1. Use Piper + `piper-sample-generator` as the default TTS generator.
+2. Start with Japanese Piper voices for the canonical phrase, including community Japanese voices such as Tsukuyomi-chan-derived examples if their model and generated-output licenses are acceptable.
+3. Generate multiple speed and speaker variants.
+4. Resample all generated audio to 16 kHz mono WAV.
+5. If Piper Japanese voice quality is insufficient after a small listening/evaluation pass, add an engine abstraction before adding Coqui TTS / Style-Bert-VITS2 / other local Japanese engines.
+6. Do not mix engines blindly; tag every sample with `source_engine`, `voice`, and `license_note`.
 
 ## Training flow
 
