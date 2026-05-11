@@ -10,8 +10,10 @@ from suburi_wakeword.audio import load_wav_mono, write_wav_mono16
 from suburi_wakeword.augment import AugmentationPlan, augment_manifest_records
 from suburi_wakeword.dataset_split import assign_splits
 from suburi_wakeword.microwakeword import (
+    MicroWakeWordFeaturePlan,
     MicroWakeWordTrainingConfig,
     MicroWakeWordTrainingPlan,
+    build_microwakeword_feature_plan,
     build_microwakeword_training_plan,
     train_microwakeword_model,
     train_microwakeword_smoke_model,
@@ -75,17 +77,45 @@ class PipelineContractTests(unittest.TestCase):
         self.assertAlmostEqual(rows[1]["far_per_sample"], 0.0)
 
     def _write_split_manifest(self, root: Path) -> Path:
+        audio_dir = root / "audio"
+        audio_dir.mkdir()
+        for name in ["p1", "n1", "p2", "n2", "h1"]:
+            write_wav_mono16(audio_dir / f"{name}.wav", np.zeros(1600, dtype=np.float32), 16000)
         records = [
-            {"sample_id": "p1", "label": "positive", "split": "train", "normalized_audio_path": "p1.wav"},
-            {"sample_id": "n1", "label": "negative", "split": "train", "normalized_audio_path": "n1.wav"},
-            {"sample_id": "p2", "label": "positive", "split": "validation", "normalized_audio_path": "p2.wav"},
-            {"sample_id": "n2", "label": "negative", "split": "validation", "normalized_audio_path": "n2.wav"},
+            {"sample_id": "p1", "label": "positive", "split": "train", "normalized_audio_path": str(audio_dir / "p1.wav")},
+            {"sample_id": "n1", "label": "negative", "split": "train", "normalized_audio_path": str(audio_dir / "n1.wav")},
+            {"sample_id": "p2", "label": "positive", "split": "validation", "normalized_audio_path": str(audio_dir / "p2.wav")},
+            {"sample_id": "n2", "label": "negative", "split": "validation", "normalized_audio_path": str(audio_dir / "n2.wav")},
+            {"sample_id": "h1", "label": "holdout", "split": "holdout", "normalized_audio_path": str(audio_dir / "h1.wav")},
         ]
         manifest = root / "dataset.jsonl"
         manifest.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
         return manifest
 
-    def test_microwakeword_training_plan_uses_upstream_cli_and_quantized_streaming_output(self):
+    def test_microwakeword_feature_plan_stages_audio_and_writes_upstream_ragged_mmap_script(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._write_split_manifest(root)
+            source_dir = root / "micro-wake-word"
+
+            plan = build_microwakeword_feature_plan(manifest, root, source_dir=source_dir)
+
+            self.assertIsInstance(plan, MicroWakeWordFeaturePlan)
+            self.assertEqual(plan.command[:4], ["uv", "run", "python", str(plan.script_path)])
+            self.assertEqual(plan.cwd, source_dir)
+            self.assertEqual(plan.positive_features_dir, root / "features" / "positive")
+            self.assertEqual(plan.negative_features_dir, root / "features" / "negative")
+            self.assertTrue((root / "features" / "positive" / "training" / "wav" / "p1.wav").exists())
+            self.assertTrue((root / "features" / "positive" / "validation" / "wav" / "p2.wav").exists())
+            self.assertTrue((root / "features" / "negative" / "training" / "wav" / "n1.wav").exists())
+            self.assertTrue((root / "features" / "negative" / "validation" / "wav" / "n2.wav").exists())
+            self.assertTrue((root / "features" / "negative" / "testing" / "wav" / "h1.wav").exists())
+            script = plan.script_path.read_text(encoding="utf-8")
+            self.assertIn("from mmap_ninja.ragged import RaggedMmap", script)
+            self.assertIn("SpectrogramGeneration", script)
+            self.assertIn("wakeword_mmap", script)
+
+    def test_microwakeword_training_plan_uses_generated_feature_dirs(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             manifest = self._write_split_manifest(root)
@@ -102,7 +132,9 @@ class PipelineContractTests(unittest.TestCase):
             self.assertIn("mixednet", plan.command)
             training_config = json.loads(plan.training_config_path.read_text(encoding="utf-8"))
             self.assertEqual(training_config["train_dir"], str(root / "artifacts" / "microwakeword-train"))
+            self.assertEqual(training_config["features"][0]["features_dir"], str(root / "features" / "positive"))
             self.assertEqual(training_config["features"][0]["truth"], True)
+            self.assertEqual(training_config["features"][1]["features_dir"], str(root / "features" / "negative"))
             self.assertEqual(training_config["features"][1]["truth"], False)
 
     def test_microwakeword_model_handoff_rejects_placeholder_tflite_and_copies_real_output(self):

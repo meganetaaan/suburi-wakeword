@@ -34,6 +34,15 @@ class MicroWakeWordTrainingPlan:
     train_dir: Path
 
 
+@dataclass(frozen=True)
+class MicroWakeWordFeaturePlan:
+    command: list[str]
+    cwd: Path
+    script_path: Path
+    positive_features_dir: Path
+    negative_features_dir: Path
+
+
 def _read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
@@ -42,6 +51,109 @@ def _validate_split_records(records: Sequence[dict]) -> None:
     for record in records:
         if "split" not in record:
             raise ValueError(f"record is missing split: {record.get('sample_id')}")
+
+
+def _record_audio_path(record: dict, base_dir: Path) -> Path:
+    path = Path(record["normalized_audio_path"])
+    return path if path.is_absolute() else base_dir / path
+
+
+def _mww_split_name(record: dict) -> str:
+    split = record["split"]
+    if split == "train":
+        return "training"
+    if split == "validation":
+        return "validation"
+    if split == "holdout":
+        return "testing"
+    if split in {"testing", "testing_ambient", "validation_ambient"}:
+        return split
+    raise ValueError(f"unsupported split for microWakeWord features: {split}")
+
+
+def _feature_class_dir(record: dict, positive_features_dir: Path, negative_features_dir: Path) -> Path:
+    return positive_features_dir if record["label"] == "positive" else negative_features_dir
+
+
+def _stage_feature_audio(records: Sequence[dict], base_dir: Path, positive_features_dir: Path, negative_features_dir: Path) -> None:
+    for record in records:
+        source = _record_audio_path(record, base_dir)
+        if not source.exists():
+            raise FileNotFoundError(f"normalized audio is missing for {record.get('sample_id')}: {source}")
+        class_dir = _feature_class_dir(record, positive_features_dir, negative_features_dir)
+        split_dir = class_dir / _mww_split_name(record) / "wav"
+        split_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, split_dir / f"{record['sample_id']}.wav")
+
+
+def _write_feature_generation_script(path: Path, positive_features_dir: Path, negative_features_dir: Path, *, step_ms: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f'''from pathlib import Path
+
+from mmap_ninja.ragged import RaggedMmap
+from microwakeword.audio.clips import Clips
+from microwakeword.audio.spectrograms import SpectrogramGeneration
+
+
+FEATURE_DIRS = [{str(positive_features_dir)!r}, {str(negative_features_dir)!r}]
+SPLITS = ["training", "validation", "testing"]
+STEP_MS = {int(step_ms)}
+
+
+def generate_split(features_dir: Path, split: str) -> None:
+    wav_dir = features_dir / split / "wav"
+    if not wav_dir.exists() or not list(wav_dir.glob("*.wav")):
+        return
+    out_dir = features_dir / split / "wakeword_mmap"
+    if out_dir.exists():
+        return
+    clips = Clips(str(wav_dir), "*.wav")
+    spectrograms = SpectrogramGeneration(clips=clips, step_ms=STEP_MS, slide_frames=10 if split != "testing" else 1)
+    RaggedMmap.from_generator(
+        out_dir=str(out_dir),
+        sample_generator=spectrograms.spectrogram_generator(repeat=2 if split == "training" else 1),
+        batch_size=100,
+        verbose=True,
+    )
+
+
+def main() -> None:
+    for feature_dir in FEATURE_DIRS:
+        for split in SPLITS:
+            generate_split(Path(feature_dir), split)
+
+
+if __name__ == "__main__":
+    main()
+''',
+        encoding="utf-8",
+    )
+
+
+def build_microwakeword_feature_plan(
+    manifest_path: Path,
+    base_dir: Path,
+    *,
+    source_dir: Path,
+    config: MicroWakeWordTrainingConfig = MicroWakeWordTrainingConfig(),
+) -> MicroWakeWordFeaturePlan:
+    records = _read_jsonl(manifest_path)
+    _validate_split_records(records)
+    positive_features_dir = base_dir / "features" / "positive"
+    negative_features_dir = base_dir / "features" / "negative"
+    positive_features_dir.mkdir(parents=True, exist_ok=True)
+    negative_features_dir.mkdir(parents=True, exist_ok=True)
+    _stage_feature_audio(records, base_dir, positive_features_dir, negative_features_dir)
+    script_path = base_dir / "artifacts" / "microwakeword-train" / "generate_features.py"
+    _write_feature_generation_script(script_path, positive_features_dir, negative_features_dir, step_ms=config.window_step_ms)
+    return MicroWakeWordFeaturePlan(
+        command=["uv", "run", "python", str(script_path)],
+        cwd=source_dir,
+        script_path=script_path,
+        positive_features_dir=positive_features_dir,
+        negative_features_dir=negative_features_dir,
+    )
 
 
 def _write_smoke_tflite(path: Path, records: list[dict], config: MicroWakeWordTrainingConfig) -> None:
@@ -140,10 +252,7 @@ def build_microwakeword_training_plan(
     _validate_split_records(records)
     train_dir = base_dir / "artifacts" / "microwakeword-train"
     train_dir.mkdir(parents=True, exist_ok=True)
-    positive_dir = base_dir / "features" / "positive"
-    negative_dir = base_dir / "features" / "negative"
-    positive_dir.mkdir(parents=True, exist_ok=True)
-    negative_dir.mkdir(parents=True, exist_ok=True)
+    feature_plan = build_microwakeword_feature_plan(manifest_path, base_dir, source_dir=source_dir, config=config)
     training_config_path = train_dir / "training_config.json"
     training_config = {
         "train_dir": str(train_dir),
@@ -154,7 +263,7 @@ def build_microwakeword_training_plan(
         "learning_rates": list(config.learning_rates),
         "features": [
             {
-                "features_dir": str(positive_dir),
+                "features_dir": str(feature_plan.positive_features_dir),
                 "sampling_weight": 1.0,
                 "penalty_weight": 1.0,
                 "truth": True,
@@ -162,7 +271,7 @@ def build_microwakeword_training_plan(
                 "type": "mmap",
             },
             {
-                "features_dir": str(negative_dir),
+                "features_dir": str(feature_plan.negative_features_dir),
                 "sampling_weight": 1.0,
                 "penalty_weight": 1.0,
                 "truth": False,
@@ -204,6 +313,8 @@ def train_microwakeword_model(
     if prebuilt_tflite is None:
         if source_dir is None:
             raise ValueError("source_dir is required when prebuilt_tflite is not provided")
+        feature_plan = build_microwakeword_feature_plan(manifest_path, base_dir, source_dir=source_dir, config=config)
+        subprocess.run(feature_plan.command, cwd=feature_plan.cwd, check=True)
         plan = build_microwakeword_training_plan(manifest_path, base_dir, config, source_dir=source_dir, model_architecture=model_architecture)
         subprocess.run(plan.command, cwd=plan.cwd, check=True)
         prebuilt_tflite = plan.expected_tflite
