@@ -1,0 +1,12 @@
+{
+  "name": "suburi-wakeword",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Wake word training and voice collection pipeline for Stack-chan experiments.",
+  "scripts": {
+    "docs:check": "node scripts/check-docs.mjs",
+    "ci": "pnpm docs:check"
+  },
+  "devDependencies": {}
+}
