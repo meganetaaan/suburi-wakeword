@@ -9,7 +9,13 @@ import numpy as np
 from suburi_wakeword.audio import load_wav_mono, write_wav_mono16
 from suburi_wakeword.augment import AugmentationPlan, augment_manifest_records
 from suburi_wakeword.dataset_split import assign_splits
-from suburi_wakeword.microwakeword import MicroWakeWordTrainingConfig, train_microwakeword_smoke_model
+from suburi_wakeword.microwakeword import (
+    MicroWakeWordTrainingConfig,
+    MicroWakeWordTrainingPlan,
+    build_microwakeword_training_plan,
+    train_microwakeword_model,
+    train_microwakeword_smoke_model,
+)
 from suburi_wakeword.threshold_sweep import sweep_thresholds
 
 
@@ -68,32 +74,63 @@ class PipelineContractTests(unittest.TestCase):
         self.assertAlmostEqual(rows[1]["frr"], 0.5)
         self.assertAlmostEqual(rows[1]["far_per_sample"], 0.0)
 
-    def test_microwakeword_smoke_training_exports_tflite_and_manifest(self):
+    def _write_split_manifest(self, root: Path) -> Path:
+        records = [
+            {"sample_id": "p1", "label": "positive", "split": "train", "normalized_audio_path": "p1.wav"},
+            {"sample_id": "n1", "label": "negative", "split": "train", "normalized_audio_path": "n1.wav"},
+            {"sample_id": "p2", "label": "positive", "split": "validation", "normalized_audio_path": "p2.wav"},
+            {"sample_id": "n2", "label": "negative", "split": "validation", "normalized_audio_path": "n2.wav"},
+        ]
+        manifest = root / "dataset.jsonl"
+        manifest.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+        return manifest
+
+    def test_microwakeword_training_plan_uses_upstream_cli_and_quantized_streaming_output(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            records = [
-                {"sample_id": "p1", "label": "positive", "split": "train", "normalized_audio_path": "p1.wav"},
-                {"sample_id": "n1", "label": "negative", "split": "train", "normalized_audio_path": "n1.wav"},
-                {"sample_id": "p2", "label": "positive", "split": "validation", "normalized_audio_path": "p2.wav"},
-                {"sample_id": "n2", "label": "negative", "split": "validation", "normalized_audio_path": "n2.wav"},
-            ]
-            manifest = root / "dataset.jsonl"
-            manifest.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+            manifest = self._write_split_manifest(root)
+            source_dir = root / "micro-wake-word"
+            config = MicroWakeWordTrainingConfig(wake_word="hai_stackchan", model_name="hai_stackchan_ja", probability_cutoff=0.55)
 
-            artifact_dir = train_microwakeword_smoke_model(
+            plan = build_microwakeword_training_plan(manifest, root, config, source_dir=source_dir, model_architecture="mixednet")
+
+            self.assertIsInstance(plan, MicroWakeWordTrainingPlan)
+            self.assertEqual(plan.expected_tflite, root / "artifacts" / "microwakeword-train" / "tflite_stream_state_internal_quant" / "stream_state_internal_quant.tflite")
+            self.assertEqual(plan.command[:4], ["uv", "run", "python", "-m"])
+            self.assertIn("microwakeword.model_train_eval", plan.command)
+            self.assertIn("--test_tflite_streaming_quantized", plan.command)
+            self.assertIn("mixednet", plan.command)
+            training_config = json.loads(plan.training_config_path.read_text(encoding="utf-8"))
+            self.assertEqual(training_config["train_dir"], str(root / "artifacts" / "microwakeword-train"))
+            self.assertEqual(training_config["features"][0]["truth"], True)
+            self.assertEqual(training_config["features"][1]["truth"], False)
+
+    def test_microwakeword_model_handoff_rejects_placeholder_tflite_and_copies_real_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._write_split_manifest(root)
+            upstream_output = root / "upstream" / "stream_state_internal_quant.tflite"
+            upstream_output.parent.mkdir(parents=True)
+            upstream_output.write_bytes(b"TFL3-real-microwakeword-output")
+
+            artifact_dir = train_microwakeword_model(
                 manifest,
                 root,
                 MicroWakeWordTrainingConfig(wake_word="hai_stackchan", model_name="hai_stackchan_ja", probability_cutoff=0.55),
+                prebuilt_tflite=upstream_output,
             )
 
             tflite = artifact_dir / "model" / "stream_state_internal_quant.tflite"
             mww_manifest = artifact_dir / "model" / "hai_stackchan_ja.json"
-            self.assertTrue(tflite.exists())
+            self.assertEqual(tflite.read_bytes(), b"TFL3-real-microwakeword-output")
             manifest_json = json.loads(mww_manifest.read_text(encoding="utf-8"))
-            self.assertEqual(manifest_json["type"], "micro")
-            self.assertEqual(manifest_json["wake_word"], "hai_stackchan")
-            self.assertEqual(manifest_json["model"], "stream_state_internal_quant.tflite")
+            self.assertEqual(manifest_json["training_backend"], "microWakeWord")
             self.assertEqual(manifest_json["trained_sample_counts"]["train"]["positive"], 1)
+
+            placeholder = root / "placeholder.tflite"
+            placeholder.write_bytes(b'TFL3{"format":"suburi-microwakeword-smoke-tflite-placeholder"}')
+            with self.assertRaisesRegex(ValueError, "placeholder"):
+                train_microwakeword_model(manifest, root, MicroWakeWordTrainingConfig(), prebuilt_tflite=placeholder)
 
 
 if __name__ == "__main__":

@@ -68,4 +68,4 @@ from the source runtime with `onnxruntime`, `soundfile`, `pyopenjtalk-plus`, and
 
 ## Next step
 
-Replace `suburi_wakeword.microwakeword.train_microwakeword_smoke_model` with a pinned upstream microWakeWord trainer invocation that writes the same `artifacts/model/*` and `artifacts/metrics/*` contract.
+Replace `suburi_wakeword.microwakeword.train_microwakeword_smoke_model` with a full upstream microWakeWord trainer run once RaggedMmap spectrogram feature generation is wired. The real handoff adapter already rejects placeholder `.tflite` bytes and only publishes non-placeholder upstream `stream_state_internal_quant.tflite` exports via `train_microwakeword_model`.
