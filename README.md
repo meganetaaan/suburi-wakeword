@@ -25,10 +25,10 @@
    - positive samples: 「ハイ、ｽﾀｯｸﾁｬﾝ」の発話揺れ
    - hard negative samples: 似た語・部分語・雑談
    - augmentation: noise / reverb / speed / gain
-   - current smoke runner: `training/pipeline` uses Piper Plus Tsukuyomi-chan to generate a tiny ignored local dataset and a non-production centroid smoke model
+   - current smoke runner: `training/pipeline` uses Piper Plus Tsukuyomi-chan to generate a tiny ignored local dataset, augmentation variants, train/validation/holdout split, threshold sweep, and microWakeWord handoff artifacts
 3. microWakeWord 学習パイプラインを作る
-   - `.tflite` export
-   - manifest JSON 生成
+   - `.tflite` export at `artifacts/model/stream_state_internal_quant.tflite`
+   - manifest JSON at `artifacts/model/hai_stackchan_ja.json`
    - threshold / sliding window の評価
 4. ESP32-S3 実機評価
    - FAR: false accepts per hour

@@ -1,15 +1,17 @@
 # Training pipeline smoke runner
 
-This package currently validates the local TTS/data/training plumbing for **hai_stackchan_ja**.
+This package validates the local TTS/data/training handoff plumbing for **hai_stackchan_ja**.
 
 It is intentionally small:
 
-- local TTS: Piper Plus Tsukuyomi-chan Japanese model
-- generated samples: Japanese positive variants and hard negatives
+- local TTS: Piper Plus Tsukuyomi-chan model
+- generated samples: Japanese positive variants, hard negatives, and English holdout/near-miss
 - normalization: 16 kHz mono WAV
-- model: tiny centroid classifier used only as a smoke artifact
+- augmentation: speed, gain, reverb, background noise
+- split: positive/negative train + validation, with holdout kept separate
+- output: microWakeWord-style `.tflite` + JSON manifest handoff artifacts
 
-The smoke model is **not** the final microWakeWord model. It exists to prove that local Japanese TTS generation, dataset manifest creation, audio normalization, feature extraction, training, and inference artifact writing can run end-to-end.
+The current `.tflite` is a **smoke placeholder** that preserves the expected microWakeWord artifact contract. It is not a production trained model and its threshold sweep is not a production FAR/FRR claim.
 
 ## Test
 
@@ -35,6 +37,16 @@ The command writes ignored local outputs under:
 training/pipeline/runs/smoke/hai_stackchan_ja/
 ```
 
+Key outputs:
+
+```text
+artifacts/model/stream_state_internal_quant.tflite
+artifacts/model/hai_stackchan_ja.json
+artifacts/metrics/threshold-sweep.json
+artifacts/metrics/validation-scores.jsonl
+dataset.jsonl
+```
+
 A timestamped run can be produced with:
 
 ```bash
@@ -52,8 +64,8 @@ The current PyPI `piper` CLI installed from `piper-plus` can list and download J
 uv run python -m piper_train.infer_onnx
 ```
 
-from the source runtime with `onnxruntime`, `soundfile`, and `pyopenjtalk-plus` installed into that local ignored checkout.
+from the source runtime with `onnxruntime`, `soundfile`, `pyopenjtalk-plus`, and `g2p-en` installed into that local ignored checkout. English holdout synthesis also downloads the NLTK `averaged_perceptron_tagger_eng`, `averaged_perceptron_tagger`, and `cmudict` resources for `g2p-en`.
 
 ## Next step
 
-Replace the centroid smoke classifier with real microWakeWord training once the TTS generation and dataset contract are stable.
+Replace `suburi_wakeword.microwakeword.train_microwakeword_smoke_model` with a pinned upstream microWakeWord trainer invocation that writes the same `artifacts/model/*` and `artifacts/metrics/*` contract.

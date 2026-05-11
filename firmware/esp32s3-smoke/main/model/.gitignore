@@ -1,0 +1,3 @@
+*.tflite
+*.json
+!README.md

@@ -1,0 +1,18 @@
+wake_word: hai_stackchan
+model_name: hai_stackchan_ja
+locale: ja-JP
+positive_labels:
+  - positive
+negative_labels:
+  - negative
+holdout_labels:
+  - holdout
+sample_rate: 16000
+micro:
+  probability_cutoff: 0.5
+  sliding_window_size: 5
+  tensor_arena_size: 60000
+outputs:
+  tflite: artifacts/model/stream_state_internal_quant.tflite
+  manifest: artifacts/model/hai_stackchan_ja.json
+  threshold_sweep: artifacts/metrics/threshold-sweep.json

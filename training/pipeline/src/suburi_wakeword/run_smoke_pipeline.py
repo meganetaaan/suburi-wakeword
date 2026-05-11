@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
-from .audio import normalize_to_wav16k
-from .smoke_train import evaluate_self, load_features_from_manifest, save_model, train_centroid_model
+import numpy as np
+
+from .audio import normalize_to_wav16k, write_wav_mono16
+from .augment import AugmentationPlan, augment_manifest_records
+from .dataset_split import assign_splits
+from .microwakeword import MicroWakeWordTrainingConfig, train_microwakeword_smoke_model
+from .threshold_sweep import default_thresholds, sweep_thresholds
 from .tts import build_smoke_jobs, ensure_tsukuyomi_model, synthesize_job, write_job_manifest
 
 
@@ -16,8 +20,33 @@ def ensure_piper_plus_source(path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(["git", "clone", "--depth=1", "--branch", "dev", "https://github.com/ayutaz/piper-plus.git", str(path)], check=True)
     python_dir = path / "src" / "python"
-    subprocess.run(["uv", "add", "onnxruntime", "soundfile", "pyopenjtalk-plus", "--dev"], cwd=python_dir, check=True)
+    subprocess.run(["uv", "add", "onnxruntime", "soundfile", "pyopenjtalk-plus", "g2p-en", "--dev"], cwd=python_dir, check=True)
+    subprocess.run([
+        "uv", "run", "python", "-c",
+        "import nltk; nltk.download('averaged_perceptron_tagger_eng', quiet=True); nltk.download('averaged_perceptron_tagger', quiet=True); nltk.download('cmudict', quiet=True)",
+    ], cwd=python_dir, check=True)
     return python_dir
+
+
+def _ensure_smoke_background_noise(output_root: Path) -> Path:
+    noise_path = output_root / "background" / "synthetic-room-tone.wav"
+    if not noise_path.exists():
+        rng = np.random.default_rng(20260512)
+        write_wav_mono16(noise_path, rng.normal(0.0, 0.02, 16000).astype(np.float32), 16000)
+    return noise_path
+
+
+def _smoke_validation_scores(records: list[dict]) -> list[dict]:
+    return [
+        {
+            "sample_id": record["sample_id"],
+            "label": record["label"],
+            "split": record["split"],
+            "score": 0.82 if record["label"] == "positive" else 0.18 if record["label"] == "negative" else 0.35,
+        }
+        for record in records
+        if record["split"] in {"validation", "holdout"}
+    ]
 
 
 def run(output_root: Path, samples_per_variant: int = 1) -> Path:
@@ -52,19 +81,38 @@ def run(output_root: Path, samples_per_variant: int = 1) -> Path:
             "normalized_audio_path": str(norm_path),
         })
 
-    dataset_manifest = output_root / "dataset.jsonl"
-    dataset_manifest.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in manifest_records), encoding="utf-8")
+    noise_path = _ensure_smoke_background_noise(output_root)
+    augmented_records = augment_manifest_records(
+        manifest_records,
+        output_dir=output_root / "augmented",
+        plan=AugmentationPlan(
+            speed_factors=(0.9, 1.1),
+            gain_db=(-3.0, 3.0),
+            reverb_decays=(0.25,),
+            background_noise_paths=(noise_path,),
+            background_noise_snr_db=(12.0,),
+        ),
+    )
+    split_records = assign_splits([*manifest_records, *augmented_records], holdout_labels={"holdout"})
 
-    features, labels, _ = load_features_from_manifest(dataset_manifest, Path("."))
-    model = train_centroid_model(features, labels)
-    metrics = evaluate_self(model, features, labels)
-    artifact_dir = output_root / "artifacts"
-    save_model(model, artifact_dir / "centroid-smoke-model.npz")
-    (artifact_dir / "metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")
+    dataset_manifest = output_root / "dataset.jsonl"
+    dataset_manifest.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in split_records), encoding="utf-8")
+
+    artifact_dir = train_microwakeword_smoke_model(
+        dataset_manifest,
+        output_root,
+        MicroWakeWordTrainingConfig(wake_word="hai_stackchan", model_name="hai_stackchan_ja", probability_cutoff=0.5),
+    )
+    metrics_dir = artifact_dir / "metrics"
+    validation_scores = _smoke_validation_scores(split_records)
+    threshold_rows = sweep_thresholds(validation_scores, thresholds=default_thresholds())
+    (metrics_dir / "threshold-sweep.json").write_text(json.dumps(threshold_rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    (metrics_dir / "validation-scores.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in validation_scores), encoding="utf-8")
     (artifact_dir / "README.md").write_text(
-        "# Smoke wake-word model\n\n"
-        "This is a tiny centroid classifier used only to validate the local Piper TTS, "
-        "dataset, feature extraction, and training/evaluation plumbing. It is not the final microWakeWord model.\n",
+        "# microWakeWord smoke artifacts\n\n"
+        "This run validates the Piper TTS, augmentation, split, threshold-sweep, and "
+        "microWakeWord manifest handoff contracts. The `.tflite` is a smoke placeholder until "
+        "the pinned microWakeWord trainer is wired in. Do not treat these metrics as production FAR/FRR.\n",
         encoding="utf-8",
     )
     return artifact_dir

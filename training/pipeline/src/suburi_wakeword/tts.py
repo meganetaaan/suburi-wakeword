@@ -47,6 +47,9 @@ def build_smoke_jobs(length_scales: Sequence[float] = (1.3, 1.5)) -> list[TtsJob
         "スタックは机の上にあります",
         "ねえ、ロボットちゃん",
     ]
+    holdout_texts = [
+        "Hi, Stack-chan",
+    ]
     jobs: list[TtsJob] = []
     for text in positive_texts:
         for scale in length_scales:
@@ -54,6 +57,9 @@ def build_smoke_jobs(length_scales: Sequence[float] = (1.3, 1.5)) -> list[TtsJob
     for text in negative_texts:
         for scale in length_scales[:1]:
             jobs.append(TtsJob(_sample_id("negative", text, scale), "hai_stackchan_ja", "negative", text, float(scale)))
+    for text in holdout_texts:
+        for scale in length_scales[:1]:
+            jobs.append(TtsJob(_sample_id("holdout", text, scale), "hai_stackchan_ja", "holdout", text, float(scale), language="en"))
     return jobs
 
 
