@@ -23,6 +23,8 @@ class MicroWakeWordTrainingConfig:
     batch_size: int = 16
     training_steps: tuple[int, ...] = (10,)
     learning_rates: tuple[float, ...] = (0.001,)
+    positive_class_weight: float = 1.0
+    negative_class_weight: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -294,8 +296,8 @@ def build_microwakeword_training_plan(
         "batch_size": config.batch_size,
         "training_steps": list(config.training_steps),
         "learning_rates": list(config.learning_rates),
-        "positive_class_weight": [1.0],
-        "negative_class_weight": [1.0],
+        "positive_class_weight": [float(config.positive_class_weight)],
+        "negative_class_weight": [float(config.negative_class_weight)],
         "time_mask_max_size": [0],
         "time_mask_count": [0],
         "freq_mask_max_size": [0],

@@ -188,6 +188,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", default="suburi-real-microwakeword-cv-v1")
     parser.add_argument("--training-steps", type=int, default=500)
     parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--positive-class-weight", type=float, default=1.0)
+    parser.add_argument("--negative-class-weight", type=float, default=1.0)
     parser.add_argument("--validation-fraction", type=float, default=0.15)
     parser.add_argument("--threshold", type=float, action="append", dest="thresholds")
     parser.add_argument("--max-positive-groups", type=int, default=None)
@@ -244,7 +246,12 @@ def main() -> None:
             train_microwakeword_model(
                 train_manifest,
                 fold_root,
-                MicroWakeWordTrainingConfig(training_steps=(int(args.training_steps),), batch_size=int(args.batch_size)),
+                MicroWakeWordTrainingConfig(
+                    training_steps=(int(args.training_steps),),
+                    batch_size=int(args.batch_size),
+                    positive_class_weight=float(args.positive_class_weight),
+                    negative_class_weight=float(args.negative_class_weight),
+                ),
                 source_dir=args.source_dir.resolve(),
                 model_architecture="mixednet",
             )
@@ -287,6 +294,8 @@ def main() -> None:
         "seed": args.seed,
         "training_steps": args.training_steps,
         "batch_size": args.batch_size,
+        "positive_class_weight": args.positive_class_weight,
+        "negative_class_weight": args.negative_class_weight,
         "validation_fraction_within_training_portion": args.validation_fraction,
         "selected_counts": _counts(selected_records),
         "folds_detail": fold_rows,

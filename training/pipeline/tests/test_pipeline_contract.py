@@ -162,6 +162,19 @@ class PipelineContractTests(unittest.TestCase):
             self.assertEqual(training_config["features"][1]["truth"], False)
             self.assertEqual(plan.feature_plan.script_path, root / "artifacts" / "microwakeword-train" / "generate_features.py")
 
+    def test_microwakeword_training_plan_allows_negative_class_weight_for_far_experiments(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._write_split_manifest(root)
+            source_dir = root / "micro-wake-word"
+            config = MicroWakeWordTrainingConfig(positive_class_weight=1.0, negative_class_weight=2.5)
+
+            plan = build_microwakeword_training_plan(manifest, root, config, source_dir=source_dir)
+
+            training_config = json.loads(plan.training_config_path.read_text(encoding="utf-8"))
+            self.assertEqual(training_config["positive_class_weight"], [1.0])
+            self.assertEqual(training_config["negative_class_weight"], [2.5])
+
     def test_microwakeword_commands_use_absolute_generated_paths_for_upstream_cwd(self):
         root = Path("tmp-mww-command-contract")
         if root.exists():
