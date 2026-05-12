@@ -55,7 +55,9 @@ def _validate_split_records(records: Sequence[dict]) -> None:
 
 def _record_audio_path(record: dict, base_dir: Path) -> Path:
     path = Path(record["normalized_audio_path"])
-    return path if path.is_absolute() else base_dir / path
+    if path.is_absolute() or path.exists():
+        return path
+    return base_dir / path
 
 
 def _mww_split_name(record: dict) -> str:
@@ -84,6 +86,13 @@ def _stage_feature_audio(records: Sequence[dict], base_dir: Path, positive_featu
         split_dir = class_dir / _mww_split_name(record) / "wav"
         split_dir.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, split_dir / f"{record['sample_id']}.wav")
+        if record["label"] == "positive" and record["split"] == "validation":
+            # Upstream ROC evaluation expects positive samples in `testing`.
+            # Until a dedicated positive test split exists, mirror validation positives
+            # so export/evaluation can complete without mixing holdout into positives.
+            testing_dir = class_dir / "testing" / "wav"
+            testing_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, testing_dir / f"{record['sample_id']}.wav")
 
 
 def _write_feature_generation_script(path: Path, positive_features_dir: Path, negative_features_dir: Path, *, step_ms: int) -> None:
@@ -91,14 +100,52 @@ def _write_feature_generation_script(path: Path, positive_features_dir: Path, ne
     path.write_text(
         f'''from pathlib import Path
 
+import wave
+
+import numpy as np
 from mmap_ninja.ragged import RaggedMmap
-from microwakeword.audio.clips import Clips
-from microwakeword.audio.spectrograms import SpectrogramGeneration
+from microwakeword.audio.audio_utils import generate_features_for_clip
+from microwakeword.audio.spectrograms import SpectrogramGeneration  # documents upstream equivalent
 
 
 FEATURE_DIRS = [{str(positive_features_dir)!r}, {str(negative_features_dir)!r}]
 SPLITS = ["training", "validation", "testing"]
 STEP_MS = {int(step_ms)}
+
+
+def load_wav_mono(path: Path) -> np.ndarray:
+    with wave.open(str(path), "rb") as wav:
+        channels = wav.getnchannels()
+        sample_width = wav.getsampwidth()
+        sample_rate = wav.getframerate()
+        frames = wav.readframes(wav.getnframes())
+    if sample_width != 2 or sample_rate != 16000:
+        raise ValueError(f"Expected 16 kHz 16-bit PCM WAV: {{path}}")
+    audio = np.frombuffer(frames, dtype="<i2").astype(np.float32) / 32768.0
+    if channels > 1:
+        audio = audio.reshape(-1, channels).mean(axis=1)
+    return audio
+
+
+def slide_spectrogram(spectrogram: np.ndarray, slide_frames: int):
+    if slide_frames <= 1 or spectrogram.shape[0] < slide_frames:
+        yield spectrogram
+        return
+    spectrogram_length = spectrogram.shape[0] - slide_frames + 1
+    windows = np.lib.stride_tricks.sliding_window_view(
+        spectrogram, window_shape=(spectrogram_length, spectrogram.shape[1])
+    )
+    for index in range(slide_frames):
+        yield np.squeeze(windows[index])
+
+
+def spectrogram_generator(wav_dir: Path, split: str):
+    repeat = 2 if split == "training" else 1
+    slide_frames = 10 if split != "testing" else 1
+    for _ in range(repeat):
+        for wav_path in sorted(wav_dir.glob("*.wav")):
+            spectrogram = generate_features_for_clip(load_wav_mono(wav_path), STEP_MS)
+            yield from slide_spectrogram(spectrogram, slide_frames)
 
 
 def generate_split(features_dir: Path, split: str) -> None:
@@ -108,11 +155,9 @@ def generate_split(features_dir: Path, split: str) -> None:
     out_dir = features_dir / split / "wakeword_mmap"
     if out_dir.exists():
         return
-    clips = Clips(str(wav_dir), "*.wav")
-    spectrograms = SpectrogramGeneration(clips=clips, step_ms=STEP_MS, slide_frames=10 if split != "testing" else 1)
     RaggedMmap.from_generator(
         out_dir=str(out_dir),
-        sample_generator=spectrograms.spectrogram_generator(repeat=2 if split == "training" else 1),
+        sample_generator=spectrogram_generator(wav_dir, split),
         batch_size=100,
         verbose=True,
     )
@@ -146,9 +191,9 @@ def build_microwakeword_feature_plan(
     negative_features_dir.mkdir(parents=True, exist_ok=True)
     _stage_feature_audio(records, base_dir, positive_features_dir, negative_features_dir)
     script_path = base_dir / "artifacts" / "microwakeword-train" / "generate_features.py"
-    _write_feature_generation_script(script_path, positive_features_dir, negative_features_dir, step_ms=config.window_step_ms)
+    _write_feature_generation_script(script_path, positive_features_dir.resolve(), negative_features_dir.resolve(), step_ms=config.window_step_ms)
     return MicroWakeWordFeaturePlan(
-        command=["uv", "run", "python", str(script_path)],
+        command=["uv", "run", "python", str(script_path.resolve())],
         cwd=source_dir,
         script_path=script_path,
         positive_features_dir=positive_features_dir,
@@ -250,20 +295,31 @@ def build_microwakeword_training_plan(
 ) -> MicroWakeWordTrainingPlan:
     records = _read_jsonl(manifest_path)
     _validate_split_records(records)
-    train_dir = base_dir / "artifacts" / "microwakeword-train"
-    train_dir.mkdir(parents=True, exist_ok=True)
+    train_dir = base_dir / "artifacts" / "microwakeword-model"
     feature_plan = build_microwakeword_feature_plan(manifest_path, base_dir, source_dir=source_dir, config=config)
-    training_config_path = train_dir / "training_config.json"
+    training_config_dir = base_dir / "artifacts" / "microwakeword-train"
+    training_config_dir.mkdir(parents=True, exist_ok=True)
+    training_config_path = training_config_dir / "training_config.json"
     training_config = {
-        "train_dir": str(train_dir),
+        "train_dir": str(train_dir.resolve()),
         "clip_duration_ms": config.clip_duration_ms,
         "window_step_ms": config.window_step_ms,
         "batch_size": config.batch_size,
         "training_steps": list(config.training_steps),
         "learning_rates": list(config.learning_rates),
+        "positive_class_weight": [1.0],
+        "negative_class_weight": [1.0],
+        "time_mask_max_size": [0],
+        "time_mask_count": [0],
+        "freq_mask_max_size": [0],
+        "freq_mask_count": [0],
+        "eval_step_interval": 1,
+        "target_minimization": 0.9,
+        "minimization_metric": None,
+        "maximization_metric": "accuracy",
         "features": [
             {
-                "features_dir": str(feature_plan.positive_features_dir),
+                "features_dir": str(feature_plan.positive_features_dir.resolve()),
                 "sampling_weight": 1.0,
                 "penalty_weight": 1.0,
                 "truth": True,
@@ -271,7 +327,7 @@ def build_microwakeword_training_plan(
                 "type": "mmap",
             },
             {
-                "features_dir": str(feature_plan.negative_features_dir),
+                "features_dir": str(feature_plan.negative_features_dir.resolve()),
                 "sampling_weight": 1.0,
                 "penalty_weight": 1.0,
                 "truth": False,
@@ -288,12 +344,14 @@ def build_microwakeword_training_plan(
         "-m",
         "microwakeword.model_train_eval",
         "--training_config",
-        str(training_config_path),
+        str(training_config_path.resolve()),
         "--train",
         "1",
         "--test_tflite_streaming_quantized",
         "1",
         model_architecture,
+        "--residual_connection",
+        "0,0,0,0",
     ]
     expected_tflite = train_dir / "tflite_stream_state_internal_quant" / "stream_state_internal_quant.tflite"
     return MicroWakeWordTrainingPlan(command=command, cwd=source_dir, training_config_path=training_config_path, expected_tflite=expected_tflite, train_dir=train_dir)

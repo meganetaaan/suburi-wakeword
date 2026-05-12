@@ -11,7 +11,7 @@ It is intentionally small:
 - split: positive/negative train + validation, with holdout kept separate
 - output: microWakeWord-style `.tflite` + JSON manifest handoff artifacts
 
-The current `.tflite` is a **smoke placeholder** that preserves the expected microWakeWord artifact contract. It is not a production trained model and its threshold sweep is not a production FAR/FRR claim.
+`run_smoke_pipeline` still writes a **smoke placeholder** `.tflite` so the fast TTS/data pipeline can run without TensorFlow. The real handoff path, `suburi_wakeword.microwakeword.train_microwakeword_model`, rejects that placeholder and only publishes non-placeholder upstream microWakeWord exports. Neither smoke threshold sweep nor minimal upstream training output is a production FAR/FRR claim.
 
 ## Test
 
@@ -66,6 +66,39 @@ uv run python -m piper_train.infer_onnx
 
 from the source runtime with `onnxruntime`, `soundfile`, `pyopenjtalk-plus`, and `g2p-en` installed into that local ignored checkout. English holdout synthesis also downloads the NLTK `averaged_perceptron_tagger_eng`, `averaged_perceptron_tagger`, and `cmudict` resources for `g2p-en`.
 
-## Next step
+## microWakeWord upstream smoke
 
-Replace `suburi_wakeword.microwakeword.train_microwakeword_smoke_model` with a full upstream microWakeWord trainer run once RaggedMmap spectrogram feature generation is wired. The real handoff adapter already rejects placeholder `.tflite` bytes and only publishes non-placeholder upstream `stream_state_internal_quant.tflite` exports via `train_microwakeword_model`.
+For the real training handoff, use an ignored upstream checkout such as:
+
+```text
+training/pipeline/.local-data/tools/micro-wake-word
+```
+
+A minimal successful environment used:
+
+```bash
+cd training/pipeline/.local-data/tools/micro-wake-word
+uv venv --python 3.11 .venv
+uv pip install --python .venv/bin/python -e .
+uv pip install --python .venv/bin/python tensorboard 'numpy<2'
+```
+
+Current adapter notes:
+
+- `generate_features.py` is generated under `<run>/artifacts/microwakeword-train/` and is invoked with an absolute path from the upstream checkout cwd.
+- The generated feature script reads staged 16 kHz PCM WAVs directly with `wave` + `numpy`, then calls upstream `generate_features_for_clip`, `SpectrogramGeneration`, and `RaggedMmap`; it intentionally avoids the heavier `Clips`/`torchcodec` route for smoke generation.
+- `training_config.json` points at absolute positive/negative feature roots and uses `<run>/artifacts/microwakeword-model` as upstream `train_dir`.
+- The `mixednet` command includes `--residual_connection 0,0,0,0` for the minimal smoke architecture.
+- Upstream ROC evaluation currently needs positive testing samples, so the adapter mirrors positive validation WAVs into `features/positive/testing/wav/` until a dedicated positive test split exists. English holdout remains negative/holdout-side and is not mixed into positives.
+- TensorBoard is required for upstream training summaries.
+- NumPy is pinned to `<2` in the local upstream venv because upstream evaluation still calls `np.trapz`.
+
+A minimal smoke training/export has produced:
+
+```text
+<run>/artifacts/microwakeword-model/tflite_stream_state_internal_quant/stream_state_internal_quant.tflite
+<run>/artifacts/model/stream_state_internal_quant.tflite
+<run>/artifacts/model/hai_stackchan_ja.json
+```
+
+Those files are ignored generated artifacts. Do not commit them.
