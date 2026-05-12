@@ -1,5 +1,7 @@
 # 2026-05-12 cross-validation smoke
 
+> Historical proxy-only memo. Do not use these numbers for decisions. Current wake-word evaluation must use real upstream microWakeWord streaming `.tflite` inference; see `docs/memo/2026-05-12-real-microwakeword-evaluation.md`.
+
 This memo records a lightweight offline accuracy check for the current Piper-generated `hai_stackchan_ja` wake-word dataset.
 
 ## Scope

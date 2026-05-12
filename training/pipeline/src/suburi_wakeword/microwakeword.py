@@ -193,7 +193,7 @@ def build_microwakeword_feature_plan(
     script_path = base_dir / "artifacts" / "microwakeword-train" / "generate_features.py"
     _write_feature_generation_script(script_path, positive_features_dir.resolve(), negative_features_dir.resolve(), step_ms=config.window_step_ms)
     return MicroWakeWordFeaturePlan(
-        command=["uv", "run", "python", str(script_path.resolve())],
+        command=["uv", "run", "--no-sync", "python", str(script_path.resolve())],
         cwd=source_dir,
         script_path=script_path,
         positive_features_dir=positive_features_dir,
@@ -340,6 +340,7 @@ def build_microwakeword_training_plan(
     command = [
         "uv",
         "run",
+        "--no-sync",
         "python",
         "-m",
         "microwakeword.model_train_eval",

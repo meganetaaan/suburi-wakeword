@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import importlib
 import json
+import sys
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 import numpy as np
 
 from .audio import load_wav_mono
-from .features import extract_features
+from .threshold_sweep import sweep_thresholds
+
+
+ModelFactory = Callable[[str], object]
 
 
 def _read_manifest(manifest_path: Path) -> list[dict]:
@@ -29,54 +34,14 @@ def _label_value(record: dict) -> int:
     return 1 if record.get("label") == "positive" else 0
 
 
-def _load_feature_matrix(manifest_path: Path, records: Sequence[dict]) -> tuple[np.ndarray, np.ndarray]:
-    features = []
-    labels = []
-    for record in records:
-        audio, sample_rate = load_wav_mono(_record_audio_path(record, manifest_path))
-        features.append(extract_features(audio, sample_rate))
-        labels.append(_label_value(record))
-    return np.vstack(features).astype(np.float32), np.asarray(labels, dtype=np.int8)
-
-
-def _stratified_folds(labels: np.ndarray, folds: int) -> list[np.ndarray]:
-    if folds < 2:
-        raise ValueError("folds must be at least 2")
-    positive_indices = np.where(labels == 1)[0]
-    negative_indices = np.where(labels == 0)[0]
-    if len(positive_indices) < folds or len(negative_indices) < folds:
-        raise ValueError(
-            f"Not enough samples for {folds}-fold validation: "
-            f"positive={len(positive_indices)}, negative={len(negative_indices)}"
-        )
-    fold_indices: list[list[int]] = [[] for _ in range(folds)]
-    for source in (positive_indices, negative_indices):
-        for offset, index in enumerate(source):
-            fold_indices[offset % folds].append(int(index))
-    return [np.asarray(sorted(indices), dtype=np.int64) for indices in fold_indices]
-
-
-def _predict_nearest_centroid(train_x: np.ndarray, train_y: np.ndarray, test_x: np.ndarray) -> np.ndarray:
-    mean = train_x.mean(axis=0)
-    std = train_x.std(axis=0)
-    std[std == 0.0] = 1.0
-    normalized_train = (train_x - mean) / std
-    normalized_test = (test_x - mean) / std
-    positive_centroid = normalized_train[train_y == 1].mean(axis=0)
-    negative_centroid = normalized_train[train_y == 0].mean(axis=0)
-    positive_distance = np.linalg.norm(normalized_test - positive_centroid, axis=1)
-    negative_distance = np.linalg.norm(normalized_test - negative_centroid, axis=1)
-    return (positive_distance <= negative_distance).astype(np.int8)
-
-
-def _metric_row(*, labels: np.ndarray, predictions: np.ndarray, fold: int | None = None) -> dict:
+def _metric_row(*, labels: np.ndarray, predictions: np.ndarray) -> dict:
     positives = int(np.sum(labels == 1))
     negatives = int(np.sum(labels == 0))
     false_rejects = int(np.sum((labels == 1) & (predictions == 0)))
     false_accepts = int(np.sum((labels == 0) & (predictions == 1)))
     true_positives = int(np.sum((labels == 1) & (predictions == 1)))
     true_negatives = int(np.sum((labels == 0) & (predictions == 0)))
-    row = {
+    return {
         "sample_count": int(len(labels)),
         "positive_samples": positives,
         "negative_samples": negatives,
@@ -87,72 +52,164 @@ def _metric_row(*, labels: np.ndarray, predictions: np.ndarray, fold: int | None
         "far_per_sample": false_accepts / max(1, negatives),
         "false_rejects": false_rejects,
         "false_accepts": false_accepts,
+        "true_positives": true_positives,
+        "true_negatives": true_negatives,
     }
-    if fold is not None:
-        row["fold"] = fold
-    return row
 
 
-def cross_validate_manifest(manifest_path: Path, *, folds: int = 3) -> dict:
-    """Run a lightweight stratified k-fold acoustic proxy evaluation.
+def _is_placeholder_tflite(path: Path) -> bool:
+    return b"suburi-microwakeword-smoke-tflite-placeholder" in path.read_bytes()[:4096]
 
-    This intentionally evaluates the dataset separability with the repository's
-    small handcrafted audio features and a nearest-centroid classifier. It is a
-    quick smoke metric for comparing data scales, not a production microWakeWord
-    FAR/hour estimate.
+
+def _load_upstream_model_factory(source_dir: Path | None = None) -> type:
+    """Load upstream microWakeWord's real TFLite inference Model class."""
+    if source_dir is not None:
+        resolved = str(source_dir.resolve())
+        if resolved not in sys.path:
+            sys.path.insert(0, resolved)
+    module = importlib.import_module("microwakeword.inference")
+    return module.Model
+
+
+def _score_record(model: object, record: dict, manifest_path: Path, *, step_ms: int) -> tuple[float, list[float]]:
+    audio, sample_rate = load_wav_mono(_record_audio_path(record, manifest_path))
+    if sample_rate != 16000:
+        raise ValueError(f"microWakeWord evaluation expects 16 kHz WAV: {record.get('sample_id')} ({sample_rate} Hz)")
+    scores = [float(score) for score in model.predict_clip(audio, step_ms=step_ms)]
+    return (max(scores) if scores else 0.0), scores
+
+
+def evaluate_microwakeword_manifest(
+    manifest_path: Path,
+    tflite_model_path: Path,
+    *,
+    threshold: float = 0.5,
+    thresholds: Sequence[float] | None = None,
+    step_ms: int = 10,
+    source_dir: Path | None = None,
+    model_factory: ModelFactory | None = None,
+    include_sample_scores: bool = True,
+    splits: Sequence[str] | None = None,
+) -> dict:
+    """Score a manifest with a real microWakeWord TFLite streaming model.
+
+    This evaluator intentionally does not compute handcrafted features, nearest
+    centroids, or any other proxy metric. Each WAV is passed through upstream
+    `microwakeword.inference.Model.predict_clip`, and the clip score is the max
+    streaming score emitted by that real `.tflite` model.
     """
+    manifest_path = Path(manifest_path)
+    tflite_model_path = Path(tflite_model_path)
+    if not tflite_model_path.exists():
+        raise FileNotFoundError(f"microWakeWord TFLite model is missing: {tflite_model_path}")
+    if _is_placeholder_tflite(tflite_model_path):
+        raise ValueError(f"Refusing to evaluate placeholder TFLite model: {tflite_model_path}")
     records = _read_manifest(manifest_path)
+    if splits is not None:
+        split_set = set(splits)
+        records = [record for record in records if record.get("split") in split_set]
     if not records:
-        raise ValueError(f"No records found in {manifest_path}")
-    features, labels = _load_feature_matrix(manifest_path, records)
-    folds_indices = _stratified_folds(labels, folds)
-    all_predictions = np.zeros_like(labels)
-    fold_metrics = []
-    all_indices = np.arange(len(labels))
-    for fold_number, test_indices in enumerate(folds_indices, start=1):
-        train_indices = np.setdiff1d(all_indices, test_indices, assume_unique=False)
-        predictions = _predict_nearest_centroid(features[train_indices], labels[train_indices], features[test_indices])
-        all_predictions[test_indices] = predictions
-        fold_metrics.append(_metric_row(labels=labels[test_indices], predictions=predictions, fold=fold_number))
-    aggregate = _metric_row(labels=labels, predictions=all_predictions)
-    accuracies = [row["accuracy"] for row in fold_metrics]
-    return {
-        "evaluation": "nearest_centroid_audio_feature_kfold",
-        "note": "Lightweight offline proxy; use streaming microWakeWord evaluation for production FAR/hour.",
+        raise ValueError(f"No records found in {manifest_path} for splits={splits}")
+
+    factory = model_factory or _load_upstream_model_factory(source_dir)
+    model = factory(str(tflite_model_path))
+
+    labels: list[int] = []
+    predictions: list[int] = []
+    score_rows: list[dict] = []
+    sample_rows: list[dict] = []
+    for record in records:
+        score, streaming_scores = _score_record(model, record, manifest_path, step_ms=step_ms)
+        prediction = 1 if score >= threshold else 0
+        label = _label_value(record)
+        labels.append(label)
+        predictions.append(prediction)
+        score_row = {
+            "sample_id": record.get("sample_id"),
+            "label": record.get("label"),
+            "split": record.get("split"),
+            "score": score,
+        }
+        score_rows.append(score_row)
+        if include_sample_scores:
+            sample_rows.append({
+                **score_row,
+                "expected_positive": bool(label),
+                "prediction": "positive" if prediction else "negative",
+                "streaming_score_count": len(streaming_scores),
+            })
+
+    label_array = np.asarray(labels, dtype=np.int8)
+    prediction_array = np.asarray(predictions, dtype=np.int8)
+    metrics = _metric_row(labels=label_array, predictions=prediction_array)
+    report = {
+        "evaluation": "real_microwakeword_tflite_streaming",
         "manifest": str(manifest_path),
-        "folds": folds,
-        "sample_count": aggregate["sample_count"],
-        "positive_samples": aggregate["positive_samples"],
-        "negative_samples": aggregate["negative_samples"],
-        "accuracy_mean": float(np.mean(accuracies)),
-        "accuracy_std": float(np.std(accuracies)),
-        "precision": aggregate["precision"],
-        "recall": aggregate["recall"],
-        "frr": aggregate["frr"],
-        "far_per_sample": aggregate["far_per_sample"],
-        "false_rejects_total": aggregate["false_rejects"],
-        "false_accepts_total": aggregate["false_accepts"],
-        "fold_metrics": fold_metrics,
+        "model": str(tflite_model_path),
+        "threshold": float(threshold),
+        "evaluated_splits": list(splits) if splits is not None else None,
+        "step_ms": int(step_ms),
+        "sample_count": metrics["sample_count"],
+        "positive_samples": metrics["positive_samples"],
+        "negative_samples": metrics["negative_samples"],
+        "accuracy": metrics["accuracy"],
+        "precision": metrics["precision"],
+        "recall": metrics["recall"],
+        "frr": metrics["frr"],
+        "far_per_sample": metrics["far_per_sample"],
+        "false_rejects_total": metrics["false_rejects"],
+        "false_accepts_total": metrics["false_accepts"],
+        "true_positives": metrics["true_positives"],
+        "true_negatives": metrics["true_negatives"],
     }
+    if thresholds is not None:
+        report["threshold_sweep"] = sweep_thresholds(score_rows, thresholds=thresholds)
+    if include_sample_scores:
+        report["sample_scores"] = sample_rows
+    return report
 
 
-def compare_training_scales(manifests: Iterable[tuple[str, Path]], *, folds: int = 3) -> list[dict]:
+def compare_microwakeword_manifests(
+    manifests: Iterable[tuple[str, Path]],
+    tflite_model_path: Path,
+    *,
+    threshold: float = 0.5,
+    thresholds: Sequence[float] | None = None,
+    step_ms: int = 10,
+    source_dir: Path | None = None,
+    model_factory: ModelFactory | None = None,
+    splits: Sequence[str] | None = None,
+) -> list[dict]:
     rows = []
     for scale, manifest_path in manifests:
-        report = cross_validate_manifest(manifest_path, folds=folds)
+        report = evaluate_microwakeword_manifest(
+            manifest_path,
+            tflite_model_path,
+            threshold=threshold,
+            thresholds=thresholds,
+            step_ms=step_ms,
+            source_dir=source_dir,
+            model_factory=model_factory,
+            include_sample_scores=False,
+            splits=splits,
+        )
         rows.append({
             "scale": scale,
+            "evaluation": report["evaluation"],
             "manifest": report["manifest"],
+            "model": report["model"],
+            "threshold": report["threshold"],
             "sample_count": report["sample_count"],
             "positive_samples": report["positive_samples"],
             "negative_samples": report["negative_samples"],
-            "accuracy_mean": report["accuracy_mean"],
-            "accuracy_std": report["accuracy_std"],
+            "accuracy": report["accuracy"],
             "precision": report["precision"],
             "recall": report["recall"],
             "frr": report["frr"],
             "far_per_sample": report["far_per_sample"],
             "false_rejects_total": report["false_rejects_total"],
             "false_accepts_total": report["false_accepts_total"],
+            "true_positives": report["true_positives"],
+            "true_negatives": report["true_negatives"],
         })
     return rows

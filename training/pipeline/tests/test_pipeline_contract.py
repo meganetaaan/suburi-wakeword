@@ -102,8 +102,8 @@ class PipelineContractTests(unittest.TestCase):
             plan = build_microwakeword_feature_plan(manifest, root, source_dir=source_dir)
 
             self.assertIsInstance(plan, MicroWakeWordFeaturePlan)
-            self.assertEqual(plan.command[:3], ["uv", "run", "python"])
-            self.assertEqual(plan.command[3], str(plan.script_path.resolve()))
+            self.assertEqual(plan.command[:4], ["uv", "run", "--no-sync", "python"])
+            self.assertEqual(plan.command[4], str(plan.script_path.resolve()))
             self.assertEqual(plan.cwd, source_dir)
             self.assertEqual(plan.positive_features_dir, root / "features" / "positive")
             self.assertEqual(plan.negative_features_dir, root / "features" / "negative")
@@ -135,7 +135,7 @@ class PipelineContractTests(unittest.TestCase):
             plan = build_microwakeword_feature_plan(manifest, root, source_dir=root / "micro-wake-word")
 
             self.assertTrue((plan.positive_features_dir / "training" / "wav" / "p1.wav").exists())
-            self.assertEqual(plan.command[3], str(plan.script_path.resolve()))
+            self.assertEqual(plan.command[4], str(plan.script_path.resolve()))
 
     def test_microwakeword_training_plan_uses_generated_feature_dirs(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -148,7 +148,7 @@ class PipelineContractTests(unittest.TestCase):
 
             self.assertIsInstance(plan, MicroWakeWordTrainingPlan)
             self.assertEqual(plan.expected_tflite, root / "artifacts" / "microwakeword-model" / "tflite_stream_state_internal_quant" / "stream_state_internal_quant.tflite")
-            self.assertEqual(plan.command[:4], ["uv", "run", "python", "-m"])
+            self.assertEqual(plan.command[:5], ["uv", "run", "--no-sync", "python", "-m"])
             self.assertIn("microwakeword.model_train_eval", plan.command)
             self.assertIn("--test_tflite_streaming_quantized", plan.command)
             self.assertIn("mixednet", plan.command)
@@ -172,7 +172,7 @@ class PipelineContractTests(unittest.TestCase):
             feature_plan = build_microwakeword_feature_plan(manifest, root, source_dir=source_dir)
             training_plan = build_microwakeword_training_plan(manifest, root, MicroWakeWordTrainingConfig(), source_dir=source_dir)
 
-            self.assertEqual(feature_plan.command[3], str(feature_plan.script_path.resolve()))
+            self.assertEqual(feature_plan.command[4], str(feature_plan.script_path.resolve()))
             self.assertIn(str(training_plan.training_config_path.resolve()), training_plan.command)
         finally:
             shutil.rmtree(root, ignore_errors=True)

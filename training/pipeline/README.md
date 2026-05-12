@@ -66,11 +66,25 @@ uv run python -m piper_train.infer_onnx
 
 from the source runtime with `onnxruntime`, `soundfile`, `pyopenjtalk-plus`, and `g2p-en` installed into that local ignored checkout. English holdout synthesis also downloads the NLTK `averaged_perceptron_tagger_eng`, `averaged_perceptron_tagger`, and `cmudict` resources for `g2p-en`.
 
-## lightweight cross-validation smoke
+## real microWakeWord evaluation
 
-For a quick relative accuracy check across generated dataset sizes, use `suburi_wakeword.evaluation.cross_validate_manifest(...)` or `compare_training_scales(...)`. This is a nearest-centroid classifier over the repository's simple audio features; it is useful for smoke comparisons, but it is **not** production microWakeWord streaming accuracy and must not be converted to FAR/hour.
+Evaluation must use real upstream microWakeWord streaming `.tflite` inference only. Do not use proxy cross-validation, handcrafted audio features, or nearest-centroid metrics for accuracy claims.
 
-The latest samples-per-variant 1 vs 3 run is recorded in `docs/memo/2026-05-12-cross-validation-smoke.md`.
+```python
+from pathlib import Path
+from suburi_wakeword.evaluation import evaluate_microwakeword_manifest
+from suburi_wakeword.threshold_sweep import default_thresholds
+
+report = evaluate_microwakeword_manifest(
+    Path("runs/eval/hai_stackchan_ja_samples1_20260512_093259/dataset.jsonl"),
+    Path("runs/eval/hai_stackchan_ja_samples1_20260512_093259/artifacts/model/stream_state_internal_quant.tflite"),
+    source_dir=Path(".local-data/tools/micro-wake-word"),
+    splits=("validation", "holdout"),
+    thresholds=default_thresholds(0.05, 0.95, 0.05),
+)
+```
+
+The evaluator loads `microwakeword.inference.Model`, feeds each 16 kHz WAV through `predict_clip(...)`, and uses the max streaming score for threshold metrics. It rejects placeholder smoke `.tflite` files. The latest samples-per-variant 1 vs 3 real run is recorded in `docs/memo/2026-05-12-real-microwakeword-evaluation.md`; the older `docs/memo/2026-05-12-cross-validation-smoke.md` is historical proxy-only data and must not be used for decisions.
 
 ## microWakeWord upstream smoke
 
@@ -94,6 +108,7 @@ Current adapter notes:
 - `generate_features.py` is generated under `<run>/artifacts/microwakeword-train/` and is invoked with an absolute path from the upstream checkout cwd.
 - The generated feature script reads staged 16 kHz PCM WAVs directly with `wave` + `numpy`, then calls upstream `generate_features_for_clip`, `SpectrogramGeneration`, and `RaggedMmap`; it intentionally avoids the heavier `Clips`/`torchcodec` route for smoke generation.
 - `training_config.json` points at absolute positive/negative feature roots and uses `<run>/artifacts/microwakeword-model` as upstream `train_dir`.
+- The generated feature command and training command run as `uv run --no-sync ...` so a smoke-compatible local upstream venv (notably `numpy<2`) is not silently re-synced back to incompatible dependency versions.
 - The `mixednet` command includes `--residual_connection 0,0,0,0` for the minimal smoke architecture.
 - Upstream ROC evaluation currently needs positive testing samples, so the adapter mirrors positive validation WAVs into `features/positive/testing/wav/` until a dedicated positive test split exists. English holdout remains negative/holdout-side and is not mixed into positives.
 - TensorBoard is required for upstream training summaries.
