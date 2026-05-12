@@ -66,9 +66,15 @@ uv run python -m piper_train.infer_onnx
 
 from the source runtime with `onnxruntime`, `soundfile`, `pyopenjtalk-plus`, and `g2p-en` installed into that local ignored checkout. English holdout synthesis also downloads the NLTK `averaged_perceptron_tagger_eng`, `averaged_perceptron_tagger`, and `cmudict` resources for `g2p-en`.
 
+## lightweight cross-validation smoke
+
+For a quick relative accuracy check across generated dataset sizes, use `suburi_wakeword.evaluation.cross_validate_manifest(...)` or `compare_training_scales(...)`. This is a nearest-centroid classifier over the repository's simple audio features; it is useful for smoke comparisons, but it is **not** production microWakeWord streaming accuracy and must not be converted to FAR/hour.
+
+The latest samples-per-variant 1 vs 3 run is recorded in `docs/memo/2026-05-12-cross-validation-smoke.md`.
+
 ## microWakeWord upstream smoke
 
-For the real training handoff, use an ignored upstream checkout such as:
+For the real trainer handoff, keep the upstream checkout in an ignored local tools directory:
 
 ```text
 training/pipeline/.local-data/tools/micro-wake-word

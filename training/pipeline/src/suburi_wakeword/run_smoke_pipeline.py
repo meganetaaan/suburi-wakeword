@@ -49,6 +49,13 @@ def _smoke_validation_scores(records: list[dict]) -> list[dict]:
     ]
 
 
+def _length_scales_for_count(count: int) -> tuple[float, ...]:
+    count = max(1, int(count))
+    if count == 1:
+        return (1.3,)
+    return tuple(round(float(value), 3) for value in np.linspace(1.1, 1.7, count))
+
+
 def run(output_root: Path, samples_per_variant: int = 1) -> Path:
     output_root.mkdir(parents=True, exist_ok=True)
     local_tools = Path(".local-data/tools")
@@ -57,7 +64,7 @@ def run(output_root: Path, samples_per_variant: int = 1) -> Path:
 
     raw_audio_root = output_root / "raw"
     normalized_root = output_root / "normalized"
-    jobs = build_smoke_jobs(length_scales=(1.3, 1.5)[: max(1, samples_per_variant)])
+    jobs = build_smoke_jobs(length_scales=_length_scales_for_count(samples_per_variant))
     write_job_manifest(jobs, raw_audio_root, output_root / "tts-jobs.jsonl")
 
     manifest_records = []

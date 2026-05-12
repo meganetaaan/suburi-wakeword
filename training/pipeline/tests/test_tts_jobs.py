@@ -19,6 +19,13 @@ class TtsJobTests(unittest.TestCase):
         self.assertIn("スタック", negatives)
         self.assertIn("ハイ、ロボットちゃん", negatives)
 
+    def test_build_smoke_jobs_scales_positive_negative_and_holdout_samples(self):
+        jobs = build_smoke_jobs(length_scales=(1.1, 1.2, 1.3, 1.4))
+
+        self.assertEqual(len([job for job in jobs if job.label == "positive"]), 16)
+        self.assertEqual(len([job for job in jobs if job.label == "negative"]), 24)
+        self.assertEqual(len([job for job in jobs if job.label == "holdout"]), 4)
+
 
 if __name__ == "__main__":
     unittest.main()
