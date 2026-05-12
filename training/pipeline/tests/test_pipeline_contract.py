@@ -118,6 +118,7 @@ class PipelineContractTests(unittest.TestCase):
             self.assertIn("from mmap_ninja.ragged import RaggedMmap", script)
             self.assertIn("SpectrogramGeneration", script)
             self.assertIn("wakeword_mmap", script)
+            self.assertNotIn("sliding_window_view", script)
 
     def test_microwakeword_feature_plan_accepts_manifest_paths_relative_to_current_working_directory(self):
         with tempfile.TemporaryDirectory(dir=".") as tmp:
@@ -159,6 +160,7 @@ class PipelineContractTests(unittest.TestCase):
             self.assertEqual(training_config["features"][0]["truth"], True)
             self.assertEqual(training_config["features"][1]["features_dir"], str((root / "features" / "negative").resolve()))
             self.assertEqual(training_config["features"][1]["truth"], False)
+            self.assertEqual(plan.feature_plan.script_path, root / "artifacts" / "microwakeword-train" / "generate_features.py")
 
     def test_microwakeword_commands_use_absolute_generated_paths_for_upstream_cwd(self):
         root = Path("tmp-mww-command-contract")

@@ -14,7 +14,7 @@ from .augment import count_by_split_label
 class MicroWakeWordTrainingConfig:
     wake_word: str = "hai_stackchan"
     model_name: str = "hai_stackchan_ja"
-    probability_cutoff: float = 0.5
+    probability_cutoff: float = 0.9
     sliding_window_size: int = 5
     tensor_arena_size: int = 60000
     minimum_esphome_version: str = "2024.7.0"
@@ -32,6 +32,7 @@ class MicroWakeWordTrainingPlan:
     training_config_path: Path
     expected_tflite: Path
     train_dir: Path
+    feature_plan: MicroWakeWordFeaturePlan
 
 
 @dataclass(frozen=True)
@@ -127,25 +128,11 @@ def load_wav_mono(path: Path) -> np.ndarray:
     return audio
 
 
-def slide_spectrogram(spectrogram: np.ndarray, slide_frames: int):
-    if slide_frames <= 1 or spectrogram.shape[0] < slide_frames:
-        yield spectrogram
-        return
-    spectrogram_length = spectrogram.shape[0] - slide_frames + 1
-    windows = np.lib.stride_tricks.sliding_window_view(
-        spectrogram, window_shape=(spectrogram_length, spectrogram.shape[1])
-    )
-    for index in range(slide_frames):
-        yield np.squeeze(windows[index])
-
-
 def spectrogram_generator(wav_dir: Path, split: str):
     repeat = 2 if split == "training" else 1
-    slide_frames = 10 if split != "testing" else 1
     for _ in range(repeat):
         for wav_path in sorted(wav_dir.glob("*.wav")):
-            spectrogram = generate_features_for_clip(load_wav_mono(wav_path), STEP_MS)
-            yield from slide_spectrogram(spectrogram, slide_frames)
+            yield generate_features_for_clip(load_wav_mono(wav_path), STEP_MS)
 
 
 def generate_split(features_dir: Path, split: str) -> None:
@@ -355,7 +342,14 @@ def build_microwakeword_training_plan(
         "0,0,0,0",
     ]
     expected_tflite = train_dir / "tflite_stream_state_internal_quant" / "stream_state_internal_quant.tflite"
-    return MicroWakeWordTrainingPlan(command=command, cwd=source_dir, training_config_path=training_config_path, expected_tflite=expected_tflite, train_dir=train_dir)
+    return MicroWakeWordTrainingPlan(
+        command=command,
+        cwd=source_dir,
+        training_config_path=training_config_path,
+        expected_tflite=expected_tflite,
+        train_dir=train_dir,
+        feature_plan=feature_plan,
+    )
 
 
 def train_microwakeword_model(
@@ -372,9 +366,8 @@ def train_microwakeword_model(
     if prebuilt_tflite is None:
         if source_dir is None:
             raise ValueError("source_dir is required when prebuilt_tflite is not provided")
-        feature_plan = build_microwakeword_feature_plan(manifest_path, base_dir, source_dir=source_dir, config=config)
-        subprocess.run(feature_plan.command, cwd=feature_plan.cwd, check=True)
         plan = build_microwakeword_training_plan(manifest_path, base_dir, config, source_dir=source_dir, model_architecture=model_architecture)
+        subprocess.run(plan.feature_plan.command, cwd=plan.feature_plan.cwd, check=True)
         subprocess.run(plan.command, cwd=plan.cwd, check=True)
         prebuilt_tflite = plan.expected_tflite
     if not prebuilt_tflite.exists():

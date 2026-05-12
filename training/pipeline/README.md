@@ -108,7 +108,7 @@ report = evaluate_microwakeword_manifest(
 )
 ```
 
-The evaluator loads `microwakeword.inference.Model`, feeds each 16 kHz WAV through `predict_clip(...)`, and uses the max streaming score for threshold metrics. It rejects placeholder smoke `.tflite` files. The latest samples-per-variant 1 vs 3 real run is recorded in `docs/memo/2026-05-12-real-microwakeword-evaluation.md`; the samples3 training-step sweep is recorded in `docs/memo/2026-05-12-real-microwakeword-training-step-sweep.md`. The older `docs/memo/2026-05-12-cross-validation-smoke.md` is historical proxy-only data and must not be used for decisions.
+The evaluator loads `microwakeword.inference.Model`, feeds each 16 kHz WAV through `predict_clip(...)`, and uses the max streaming score for threshold metrics. It rejects placeholder smoke `.tflite` files. The literal expanded-5k 2-fold real `.tflite` cross-validation run is recorded in `docs/memo/2026-05-13-real-microwakeword-cross-validation.md`; it reached mean accuracy 0.703 at threshold 0.955, 0.710 at threshold 0.96, and 0.729 at threshold 0.965. The expanded-5k real validation+holdout run with no local spectrogram sliding is recorded in `docs/memo/2026-05-12-expanded5k-no-slide-real-microwakeword-evaluation.md`; it reached 0.826 accuracy at threshold 0.90 and 0.887 at threshold 0.95 on validation+holdout real streaming `.tflite` inference. The samples-per-variant 1 vs 3 real run is recorded in `docs/memo/2026-05-12-real-microwakeword-evaluation.md`; the samples3 training-step sweep is recorded in `docs/memo/2026-05-12-real-microwakeword-training-step-sweep.md`. The older `docs/memo/2026-05-12-cross-validation-smoke.md` is historical proxy-only data and must not be used for decisions.
 
 ## microWakeWord upstream smoke
 
@@ -131,6 +131,7 @@ Current adapter notes:
 
 - `generate_features.py` is generated under `<run>/artifacts/microwakeword-train/` and is invoked with an absolute path from the upstream checkout cwd.
 - The generated feature script reads staged 16 kHz PCM WAVs directly with `wave` + `numpy`, then calls upstream `generate_features_for_clip`, `SpectrogramGeneration`, and `RaggedMmap`; it intentionally avoids the heavier `Clips`/`torchcodec` route for smoke generation.
+- The generated feature script writes full upstream spectrograms for each WAV. Do not add local sliding-window shortening before RaggedMmap staging; mixednet already accounts for receptive-field frame drops, and shortening clips before upstream fixed-length handling misaligns training examples with streaming `.tflite` inference.
 - `training_config.json` points at absolute positive/negative feature roots and uses `<run>/artifacts/microwakeword-model` as upstream `train_dir`.
 - The generated feature command and training command run as `uv run --no-sync ...` so a smoke-compatible local upstream venv (notably `numpy<2`) is not silently re-synced back to incompatible dependency versions.
 - The `mixednet` command includes `--residual_connection 0,0,0,0` for the minimal smoke architecture.
