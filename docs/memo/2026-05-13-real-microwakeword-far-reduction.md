@@ -71,32 +71,63 @@ Note: the first attempt used `uv run python`, which failed during scoring becaus
 | baseline weight 1.0 | 0.955 | 0.703 | 0.903 | 0.389 | 1698 | 196 |
 | baseline weight 1.0 | 0.960 | 0.710 | 0.895 | 0.375 | 1639 | 211 |
 | baseline weight 1.0 | 0.965 | 0.729 | 0.869 | 0.336 | 1469 | 264 |
+| negative weight 1.25 | 0.955 | 0.772 | 0.830 | 0.255 | 1113 | 342 |
+| negative weight 1.25 | 0.960 | 0.780 | 0.822 | 0.239 | 1044 | 358 |
+| negative weight 1.25 | 0.965 | 0.793 | 0.785 | 0.204 | 889 | 433 |
+| negative weight 1.25 | 0.970 | 0.794 | 0.780 | 0.200 | 874 | 443 |
+| negative weight 1.25 | 0.975 | 0.798 | 0.753 | 0.181 | 792 | 497 |
+| negative weight 1.5 | 0.955 | 0.830 | 0.584 | 0.057 | 249 | 838 |
+| negative weight 1.5 | 0.960 | 0.822 | 0.550 | 0.052 | 227 | 908 |
+| negative weight 1.5 | 0.965 | 0.814 | 0.502 | 0.042 | 185 | 1004 |
+| negative weight 1.5 | 0.970 | 0.805 | 0.460 | 0.036 | 158 | 1088 |
+| negative weight 1.5 | 0.975 | 0.793 | 0.409 | 0.030 | 130 | 1192 |
 | negative weight 2.0 | 0.955 | 0.718 | 0.645 | 0.248 | 1082 | 716 |
 | negative weight 2.0 | 0.960 | 0.722 | 0.615 | 0.229 | 1000 | 777 |
 | negative weight 2.0 | 0.965 | 0.729 | 0.564 | 0.195 | 852 | 879 |
 | negative weight 2.0 | 0.970 | 0.732 | 0.544 | 0.182 | 793 | 919 |
 | negative weight 2.0 | 0.980 | 0.744 | 0.467 | 0.128 | 558 | 1075 |
 
+## Narrow sweep artifacts
+
+Additional real `.tflite` CV runs:
+
+- `training/pipeline/runs/eval/real_microwakeword_cv_expanded5k_2fold_negw125_20260513/summary.json`
+- `training/pipeline/runs/eval/real_microwakeword_cv_expanded5k_2fold_negw125_20260513/false_accept_analysis_threshold_0_965.json`
+- `training/pipeline/runs/eval/real_microwakeword_cv_expanded5k_2fold_negw15_20260513/summary.json`
+- `training/pipeline/runs/eval/real_microwakeword_cv_expanded5k_2fold_negw15_20260513/false_accept_analysis_threshold_0_965.json`
+
+At threshold `0.965`, `negative_class_weight=1.25` reduced FAR/sample from `0.336` to `0.204` while recall stayed at `0.785`. This is a much better trade-off than `2.0` for the current dataset. `negative_class_weight=1.5` reduced FAR/sample further to `0.042`, but recall fell to `0.502`, so it is also too aggressive if wake-word recall matters.
+
+The best current operating candidate is therefore `negative_class_weight=1.25`, with threshold `0.965` or `0.970` depending on whether the priority is recall (`0.785`) or slightly lower FAR/sample (`0.200`). Threshold `0.975` lowers FAR/sample to `0.181`, but recall drops further to `0.753`.
+
+## Narrow sweep false-accept concentration
+
+At threshold `0.965`, `negative_class_weight=1.25` still leaves the same Japanese near-miss clusters on top:
+
+| text | false accepts | samples | FA rate |
+| --- | ---: | ---: | ---: |
+| はい、スタックチャンネル | 104 | 168 | 0.619 |
+| ハイ、スタックチャンネル | 84 | 168 | 0.500 |
+| スタックちゃん、こんにちは | 66 | 168 | 0.393 |
+| スタックちゃんと呼びました | 61 | 168 | 0.363 |
+| ねえ、スタックチャンネルを開いて | 56 | 168 | 0.333 |
+
+`negative_class_weight=1.5` sharply suppresses most of these, but the remaining top miss is still `ねえ、スタックチャンネルを開いて` with `60/168` false accepts. That suggests class weighting helps, but dataset/content work should target suffix/context near-misses rather than English holdout first.
+
 ## Interpretation
 
-`negative_class_weight=2.0` cuts FAR/sample substantially at the same threshold:
+Class weighting is a real lever, but the useful range is narrow:
 
-- threshold `0.965`: `0.336 -> 0.195`
-- false accepts: `1469 -> 852`
-
-But recall drops too much:
-
-- threshold `0.965`: `0.869 -> 0.564`
-- false rejects: `264 -> 879`
-
-So class weighting is a real lever, but `2.0` is too aggressive for the current dataset/training setup.
+- `1.25` is the first plausible FAR/recall trade-off.
+- `1.5` and `2.0` are too aggressive for recall, even though they lower false accepts.
+- The next improvement should focus on the highest Japanese near-miss clusters that survive at `negative_class_weight=1.25`.
 
 ## Recommended next run
 
-Run a narrower class-weight sweep before changing the dataset again:
+Use `negative_class_weight=1.25` as the temporary baseline and try a targeted hard-negative dataset iteration before further class-weight tuning:
 
-- `negative_class_weight=1.25`
-- `negative_class_weight=1.5`
-- thresholds around `0.955` to `0.975`
+1. Add or upsample more Japanese near-miss negatives around `スタックチャンネル`, `スタックちゃん + suffix`, and `ハイ/はい + スタック + non-wake continuation`.
+2. Re-run the same real 2-fold CV at `negative_class_weight=1.25` and thresholds `0.955` to `0.975`.
+3. Compare specifically against the threshold-`0.965` candidate: recall `0.785`, FAR/sample `0.204`, false accepts `889`, false rejects `433`.
 
 Target is not max accuracy. Prefer the operating point that lowers FAR/sample while keeping recall reasonably high, then use false-accept analysis to add/minimize the worst Japanese near-miss clusters.
