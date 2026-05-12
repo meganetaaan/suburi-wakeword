@@ -84,7 +84,7 @@ report = evaluate_microwakeword_manifest(
 )
 ```
 
-The evaluator loads `microwakeword.inference.Model`, feeds each 16 kHz WAV through `predict_clip(...)`, and uses the max streaming score for threshold metrics. It rejects placeholder smoke `.tflite` files. The latest samples-per-variant 1 vs 3 real run is recorded in `docs/memo/2026-05-12-real-microwakeword-evaluation.md`; the older `docs/memo/2026-05-12-cross-validation-smoke.md` is historical proxy-only data and must not be used for decisions.
+The evaluator loads `microwakeword.inference.Model`, feeds each 16 kHz WAV through `predict_clip(...)`, and uses the max streaming score for threshold metrics. It rejects placeholder smoke `.tflite` files. The latest samples-per-variant 1 vs 3 real run is recorded in `docs/memo/2026-05-12-real-microwakeword-evaluation.md`; the samples3 training-step sweep is recorded in `docs/memo/2026-05-12-real-microwakeword-training-step-sweep.md`. The older `docs/memo/2026-05-12-cross-validation-smoke.md` is historical proxy-only data and must not be used for decisions.
 
 ## microWakeWord upstream smoke
 
