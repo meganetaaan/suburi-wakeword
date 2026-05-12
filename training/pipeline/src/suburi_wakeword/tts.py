@@ -12,6 +12,61 @@ from typing import Iterable, Sequence
 DEFAULT_MODEL_REPO = "https://huggingface.co/ayousanz/piper-plus-tsukuyomi-chan/resolve/main"
 DEFAULT_MODEL_NAME = "tsukuyomi-chan-6lang-fp16.onnx"
 DEFAULT_CONFIG_NAME = "config.json"
+DEFAULT_VOICE = "ja_JP-tsukuyomi-chan-medium"
+
+
+DEFAULT_POSITIVE_TEXTS = (
+    "ハイ、スタックチャン",
+    "はい、スタックチャン",
+    "ハイスタックチャン",
+    "ハイ、ｽﾀｯｸﾁｬﾝ",
+)
+DEFAULT_EXPANDED_POSITIVE_TEXTS = (
+    *DEFAULT_POSITIVE_TEXTS,
+    "ハイ スタックチャン",
+    "はいスタックチャン",
+    "ハイ、スタックちゃん",
+    "はい、スタックちゃん",
+    "ハイ、すたっくちゃん",
+    "はい、すたっくちゃん",
+)
+DEFAULT_NEGATIVE_TEXTS = (
+    "スタック",
+    "ちゃん",
+    "ハイ、ロボットちゃん",
+    "こんにちは、今日はいい天気です",
+    "スタックは机の上にあります",
+    "ねえ、ロボットちゃん",
+)
+DEFAULT_EXPANDED_NEGATIVE_TEXTS = (
+    *DEFAULT_NEGATIVE_TEXTS,
+    "ハイ、スタッフさん",
+    "はい、スタッフさん",
+    "ハイ、スタートちゃん",
+    "はい、ストックちゃん",
+    "スタックチャンネル",
+    "スタックちゃんと呼びました",
+    "ねえ、スタックチャンネルを開いて",
+    "ハイ、スタックはどこですか",
+)
+DEFAULT_HOLDOUT_TEXTS = ("Hi, Stack-chan",)
+
+
+@dataclass(frozen=True)
+class VoiceProfile:
+    id: str
+    voice: str = DEFAULT_VOICE
+    speaker_id: int = 0
+    source_engine: str = "piper-plus"
+    model_id: str = "tsukuyomi-chan-6lang-fp16"
+
+
+@dataclass(frozen=True)
+class ProsodyVariant:
+    id: str
+    length_scale: float
+    noise_scale: float = 0.667
+    noise_scale_w: float = 0.8
 
 
 @dataclass(frozen=True)
@@ -22,45 +77,148 @@ class TtsJob:
     text: str
     length_scale: float
     source_engine: str = "piper-plus"
-    voice: str = "ja_JP-tsukuyomi-chan-medium"
+    voice: str = DEFAULT_VOICE
     language: str = "ja"
+    voice_profile_id: str = "tsukuyomi"
+    model_id: str = "tsukuyomi-chan-6lang-fp16"
+    speaker_id: int = 0
+    prosody_id: str = "default"
+    noise_scale: float = 0.667
+    noise_scale_w: float = 0.8
 
 
-def _sample_id(label: str, text: str, length_scale: float) -> str:
-    digest = hashlib.sha1(f"{label}\0{text}\0{length_scale}".encode("utf-8")).hexdigest()[:12]
+def _sample_id(
+    label: str,
+    text: str,
+    *,
+    voice_profile_id: str,
+    prosody_id: str,
+    length_scale: float,
+    noise_scale: float,
+    noise_scale_w: float,
+    speaker_id: int,
+    language: str,
+) -> str:
+    digest = hashlib.sha1(
+        "\0".join(
+            [
+                label,
+                text,
+                voice_profile_id,
+                prosody_id,
+                str(length_scale),
+                str(noise_scale),
+                str(noise_scale_w),
+                str(speaker_id),
+                language,
+            ]
+        ).encode("utf-8")
+    ).hexdigest()[:12]
     return f"{label}-{digest}"
+
+
+def _job(
+    *,
+    phrase_id: str,
+    label: str,
+    text: str,
+    language: str,
+    voice: VoiceProfile,
+    prosody: ProsodyVariant,
+) -> TtsJob:
+    return TtsJob(
+        sample_id=_sample_id(
+            label,
+            text,
+            voice_profile_id=voice.id,
+            prosody_id=prosody.id,
+            length_scale=prosody.length_scale,
+            noise_scale=prosody.noise_scale,
+            noise_scale_w=prosody.noise_scale_w,
+            speaker_id=voice.speaker_id,
+            language=language,
+        ),
+        phrase_id=phrase_id,
+        label=label,
+        text=text,
+        length_scale=float(prosody.length_scale),
+        source_engine=voice.source_engine,
+        voice=voice.voice,
+        language=language,
+        voice_profile_id=voice.id,
+        model_id=voice.model_id,
+        speaker_id=int(voice.speaker_id),
+        prosody_id=prosody.id,
+        noise_scale=float(prosody.noise_scale),
+        noise_scale_w=float(prosody.noise_scale_w),
+    )
+
+
+def build_expanded_jobs(
+    *,
+    positive_texts: Sequence[str],
+    negative_texts: Sequence[str],
+    holdout_texts: Sequence[str],
+    voices: Sequence[VoiceProfile],
+    prosody_variants: Sequence[ProsodyVariant],
+    phrase_id: str = "hai_stackchan_ja",
+) -> list[TtsJob]:
+    """Build a multiplicative TTS plan across phrase, voice, and prosody axes.
+
+    English near-miss holdouts stay outside positives even when all other axes are
+    multiplied. This function only plans synthesis; generated audio remains ignored.
+    """
+    jobs: list[TtsJob] = []
+    for label, texts, language in (
+        ("positive", positive_texts, "ja"),
+        ("negative", negative_texts, "ja"),
+        ("holdout", holdout_texts, "en"),
+    ):
+        for text in texts:
+            for voice in voices:
+                for prosody in prosody_variants:
+                    jobs.append(_job(phrase_id=phrase_id, label=label, text=text, language=language, voice=voice, prosody=prosody))
+    return jobs
 
 
 def build_smoke_jobs(length_scales: Sequence[float] = (1.3, 1.5)) -> list[TtsJob]:
     """Build a tiny Japanese-only wake-word smoke dataset plan."""
-    positive_texts = [
-        "ハイ、スタックチャン",
-        "はい、スタックチャン",
-        "ハイスタックチャン",
-        "ハイ、ｽﾀｯｸﾁｬﾝ",
-    ]
-    negative_texts = [
-        "スタック",
-        "ちゃん",
-        "ハイ、ロボットちゃん",
-        "こんにちは、今日はいい天気です",
-        "スタックは机の上にあります",
-        "ねえ、ロボットちゃん",
-    ]
-    holdout_texts = [
-        "Hi, Stack-chan",
-    ]
-    jobs: list[TtsJob] = []
-    for text in positive_texts:
-        for scale in length_scales:
-            jobs.append(TtsJob(_sample_id("positive", text, scale), "hai_stackchan_ja", "positive", text, float(scale)))
-    for text in negative_texts:
-        for scale in length_scales:
-            jobs.append(TtsJob(_sample_id("negative", text, scale), "hai_stackchan_ja", "negative", text, float(scale)))
-    for text in holdout_texts:
-        for scale in length_scales:
-            jobs.append(TtsJob(_sample_id("holdout", text, scale), "hai_stackchan_ja", "holdout", text, float(scale), language="en"))
-    return jobs
+    prosody_variants = tuple(
+        ProsodyVariant(id=f"length-{scale:g}", length_scale=float(scale)) for scale in length_scales
+    )
+    return build_expanded_jobs(
+        positive_texts=DEFAULT_POSITIVE_TEXTS,
+        negative_texts=DEFAULT_NEGATIVE_TEXTS,
+        holdout_texts=DEFAULT_HOLDOUT_TEXTS,
+        voices=(VoiceProfile(id="tsukuyomi"),),
+        prosody_variants=prosody_variants,
+    )
+
+
+def build_large_synthetic_jobs(
+    *,
+    voices: Sequence[VoiceProfile] = (VoiceProfile(id="tsukuyomi"),),
+    prosody_variants: Sequence[ProsodyVariant] = (
+        ProsodyVariant(id="fast-flat", length_scale=0.9, noise_scale=0.55, noise_scale_w=0.6),
+        ProsodyVariant(id="fast-default", length_scale=1.0, noise_scale=0.667, noise_scale_w=0.8),
+        ProsodyVariant(id="default", length_scale=1.15, noise_scale=0.667, noise_scale_w=0.8),
+        ProsodyVariant(id="slow-lively", length_scale=1.35, noise_scale=0.8, noise_scale_w=1.05),
+        ProsodyVariant(id="very-slow-varied", length_scale=1.6, noise_scale=0.9, noise_scale_w=1.25),
+    ),
+) -> list[TtsJob]:
+    """Build a larger multiplicative synthetic dataset plan.
+
+    The default keeps one currently verified Tsukuyomi voice/model profile, while
+    the API accepts additional `VoiceProfile`s so different models/speakers can be
+    multiplied in without changing downstream manifests.
+    """
+    return build_expanded_jobs(
+        positive_texts=DEFAULT_EXPANDED_POSITIVE_TEXTS,
+        negative_texts=DEFAULT_EXPANDED_NEGATIVE_TEXTS,
+        holdout_texts=DEFAULT_HOLDOUT_TEXTS,
+        voices=voices,
+        prosody_variants=prosody_variants,
+    )
 
 
 def ensure_tsukuyomi_model(model_dir: Path) -> tuple[Path, Path]:
@@ -82,8 +240,10 @@ def build_infer_command(job: TtsJob, *, model_path: Path, config_path: Path, out
         "--output-dir", str(output_dir.resolve()),
         "--text", job.text,
         "--language", job.language,
-        "--speaker-id", "0",
+        "--speaker-id", str(job.speaker_id),
         "--length-scale", str(job.length_scale),
+        "--noise-scale", str(job.noise_scale),
+        "--noise-scale-w", str(job.noise_scale_w),
         "--device", "cpu",
     ]
 

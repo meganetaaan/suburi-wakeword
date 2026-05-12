@@ -12,7 +12,7 @@ from .augment import AugmentationPlan, augment_manifest_records
 from .dataset_split import assign_splits
 from .microwakeword import MicroWakeWordTrainingConfig, train_microwakeword_smoke_model
 from .threshold_sweep import default_thresholds, sweep_thresholds
-from .tts import build_smoke_jobs, ensure_tsukuyomi_model, synthesize_job, write_job_manifest
+from .tts import build_large_synthetic_jobs, build_smoke_jobs, ensure_tsukuyomi_model, synthesize_job, write_job_manifest
 
 
 def ensure_piper_plus_source(path: Path) -> Path:
@@ -56,7 +56,15 @@ def _length_scales_for_count(count: int) -> tuple[float, ...]:
     return tuple(round(float(value), 3) for value in np.linspace(1.1, 1.7, count))
 
 
-def run(output_root: Path, samples_per_variant: int = 1) -> Path:
+def build_jobs_for_profile(profile: str, *, samples_per_variant: int = 1):
+    if profile == "smoke":
+        return build_smoke_jobs(length_scales=_length_scales_for_count(samples_per_variant))
+    if profile == "expanded":
+        return build_large_synthetic_jobs()
+    raise ValueError(f"Unknown dataset profile: {profile}")
+
+
+def run(output_root: Path, samples_per_variant: int = 1, dataset_profile: str = "smoke") -> Path:
     output_root.mkdir(parents=True, exist_ok=True)
     local_tools = Path(".local-data/tools")
     piper_python_dir = ensure_piper_plus_source(local_tools / "piper-plus")
@@ -64,7 +72,7 @@ def run(output_root: Path, samples_per_variant: int = 1) -> Path:
 
     raw_audio_root = output_root / "raw"
     normalized_root = output_root / "normalized"
-    jobs = build_smoke_jobs(length_scales=_length_scales_for_count(samples_per_variant))
+    jobs = build_jobs_for_profile(dataset_profile, samples_per_variant=samples_per_variant)
     write_job_manifest(jobs, raw_audio_root, output_root / "tts-jobs.jsonl")
 
     manifest_records = []
@@ -84,6 +92,12 @@ def run(output_root: Path, samples_per_variant: int = 1) -> Path:
             "voice": job.voice,
             "language": job.language,
             "length_scale": job.length_scale,
+            "noise_scale": job.noise_scale,
+            "noise_scale_w": job.noise_scale_w,
+            "voice_profile_id": job.voice_profile_id,
+            "model_id": job.model_id,
+            "speaker_id": job.speaker_id,
+            "prosody_id": job.prosody_id,
             "raw_audio_path": str(raw_path),
             "normalized_audio_path": str(norm_path),
         })
@@ -129,8 +143,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-root", type=Path, default=Path("runs/smoke/hai_stackchan_ja"))
     parser.add_argument("--samples-per-variant", type=int, default=1)
+    parser.add_argument("--dataset-profile", choices=("smoke", "expanded"), default="smoke")
     args = parser.parse_args()
-    artifact_dir = run(args.output_root, args.samples_per_variant)
+    artifact_dir = run(args.output_root, args.samples_per_variant, args.dataset_profile)
     print(artifact_dir)
 
 

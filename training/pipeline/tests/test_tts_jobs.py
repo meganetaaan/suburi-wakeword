@@ -1,5 +1,8 @@
 import unittest
-from suburi_wakeword.tts import build_smoke_jobs
+from pathlib import Path
+
+from suburi_wakeword.run_smoke_pipeline import build_jobs_for_profile
+from suburi_wakeword.tts import ProsodyVariant, VoiceProfile, build_infer_command, build_expanded_jobs, build_large_synthetic_jobs, build_smoke_jobs
 
 
 class TtsJobTests(unittest.TestCase):
@@ -25,6 +28,75 @@ class TtsJobTests(unittest.TestCase):
         self.assertEqual(len([job for job in jobs if job.label == "positive"]), 16)
         self.assertEqual(len([job for job in jobs if job.label == "negative"]), 24)
         self.assertEqual(len([job for job in jobs if job.label == "holdout"]), 4)
+
+    def test_build_expanded_jobs_multiplies_phrases_voices_and_prosody(self):
+        jobs = build_expanded_jobs(
+            positive_texts=("ハイ、スタックチャン", "はい、スタックちゃん"),
+            negative_texts=("スタック",),
+            holdout_texts=("Hi, Stack-chan",),
+            voices=(
+                VoiceProfile(id="tsukuyomi", voice="ja_JP-tsukuyomi-chan-medium", speaker_id=0),
+                VoiceProfile(id="alt", voice="ja_JP-alt-medium", speaker_id=1),
+            ),
+            prosody_variants=(
+                ProsodyVariant(id="fast-flat", length_scale=0.9, noise_scale=0.55, noise_scale_w=0.6),
+                ProsodyVariant(id="slow-lively", length_scale=1.4, noise_scale=0.8, noise_scale_w=1.1),
+            ),
+        )
+
+        positives = [job for job in jobs if job.label == "positive"]
+        negatives = [job for job in jobs if job.label == "negative"]
+        holdouts = [job for job in jobs if job.label == "holdout"]
+        self.assertEqual(len(positives), 2 * 2 * 2)
+        self.assertEqual(len(negatives), 1 * 2 * 2)
+        self.assertEqual(len(holdouts), 1 * 2 * 2)
+        self.assertEqual(len({job.sample_id for job in jobs}), len(jobs))
+        self.assertEqual({job.voice_profile_id for job in positives}, {"tsukuyomi", "alt"})
+        self.assertEqual({job.prosody_id for job in positives}, {"fast-flat", "slow-lively"})
+        self.assertNotIn("Hi, Stack-chan", {job.text for job in positives})
+        self.assertTrue(all(job.language == "en" for job in holdouts))
+
+    def test_build_infer_command_passes_prosody_and_speaker_parameters(self):
+        job = build_expanded_jobs(
+            positive_texts=("ハイ、スタックチャン",),
+            negative_texts=(),
+            holdout_texts=(),
+            voices=(VoiceProfile(id="speaker1", voice="ja_JP-test", speaker_id=3),),
+            prosody_variants=(ProsodyVariant(id="fast", length_scale=0.85, noise_scale=0.5, noise_scale_w=0.7),),
+        )[0]
+
+        command = build_infer_command(
+            job,
+            model_path=Path("/tmp/model.onnx"),
+            config_path=Path("/tmp/config.json"),
+            output_dir=Path("/tmp/out"),
+        )
+
+        self.assertIn("--noise-scale", command)
+        self.assertEqual(command[command.index("--noise-scale") + 1], "0.5")
+        self.assertIn("--noise-scale-w", command)
+        self.assertEqual(command[command.index("--noise-scale-w") + 1], "0.7")
+        self.assertEqual(command[command.index("--speaker-id") + 1], "3")
+
+    def test_large_synthetic_jobs_are_much_larger_than_smoke_and_keep_metadata_axes(self):
+        jobs = build_large_synthetic_jobs()
+        smoke_jobs = build_smoke_jobs(length_scales=(1.3,))
+        positives = [job for job in jobs if job.label == "positive"]
+
+        self.assertGreaterEqual(len(jobs), len(smoke_jobs) * 5)
+        self.assertGreaterEqual(len({job.text for job in positives}), 10)
+        self.assertGreaterEqual(len({job.prosody_id for job in positives}), 5)
+        self.assertEqual({job.voice_profile_id for job in jobs}, {"tsukuyomi"})
+        self.assertNotIn("Hi, Stack-chan", {job.text for job in positives})
+
+    def test_pipeline_profile_selects_expanded_dataset_plan(self):
+        smoke_jobs = build_jobs_for_profile("smoke", samples_per_variant=1)
+        expanded_jobs = build_jobs_for_profile("expanded", samples_per_variant=1)
+
+        self.assertGreater(len(expanded_jobs), len(smoke_jobs) * 5)
+        self.assertIn("prosody_id", expanded_jobs[0].__dataclass_fields__)
+        with self.assertRaises(ValueError):
+            build_jobs_for_profile("unknown", samples_per_variant=1)
 
 
 if __name__ == "__main__":

@@ -56,6 +56,17 @@ PYTHONPATH=src uv run python -m suburi_wakeword.run_smoke_pipeline \
   --samples-per-variant 2
 ```
 
+For a larger synthetic plan, use the expanded dataset profile. It multiplies phrase variants, hard/near negatives, and Piper Plus prosody knobs (`length_scale`, `noise_scale`, `noise_scale_w`) while preserving `voice_profile_id`, `model_id`, `speaker_id`, and `prosody_id` in `tts-jobs.jsonl` and `dataset.jsonl`:
+
+```bash
+cd training/pipeline
+PYTHONPATH=src uv run python -m suburi_wakeword.run_smoke_pipeline \
+  --dataset-profile expanded \
+  --output-root runs/smoke/hai_stackchan_ja_expanded_$(date +%Y%m%d_%H%M%S)
+```
+
+Current dry-run counts for `expanded` with the default verified Tsukuyomi voice/model profile are 125 base TTS jobs before augmentation: 50 positive, 70 negative, and 5 English holdout. Adding more `VoiceProfile`s multiplies those counts without changing the downstream manifest schema.
+
 ## Piper Plus runtime note
 
 The current PyPI `piper` CLI installed from `piper-plus` can list and download Japanese Piper Plus voices, but the 2026 MB-iSTFT Japanese models require `speaker_embedding` inputs. For this smoke pipeline, the command therefore clones `ayutaz/piper-plus` `dev` under `.local-data/tools/piper-plus` and runs:
