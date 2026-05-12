@@ -1,8 +1,10 @@
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
 from suburi_wakeword.run_smoke_pipeline import build_jobs_for_profile
-from suburi_wakeword.tts import ProsodyVariant, VoiceProfile, build_infer_command, build_expanded_jobs, build_large_synthetic_jobs, build_smoke_jobs
+from suburi_wakeword.tts import ProsodyVariant, VoiceProfile, build_infer_command, build_expanded_jobs, build_large_synthetic_jobs, build_smoke_jobs, load_voice_profiles, summarize_jobs
 
 
 class TtsJobTests(unittest.TestCase):
@@ -97,6 +99,43 @@ class TtsJobTests(unittest.TestCase):
         self.assertIn("prosody_id", expanded_jobs[0].__dataclass_fields__)
         with self.assertRaises(ValueError):
             build_jobs_for_profile("unknown", samples_per_variant=1)
+
+    def test_expanded_5k_profile_reaches_target_after_augmentation(self):
+        jobs = build_jobs_for_profile(
+            "expanded-5k",
+            samples_per_variant=1,
+            voices=(
+                VoiceProfile(id="voice-a", speaker_id=0),
+                VoiceProfile(id="voice-b", speaker_id=1),
+                VoiceProfile(id="voice-c", speaker_id=2),
+                VoiceProfile(id="voice-d", speaker_id=3),
+            ),
+        )
+        summary = summarize_jobs(jobs, augmentation_multiplier=6)
+
+        self.assertEqual(summary["base_jobs"], 912)
+        self.assertEqual(summary["estimated_after_augmentation"], 5472)
+        self.assertEqual(summary["labels"], {"positive": 288, "negative": 576, "holdout": 48})
+        self.assertEqual(summary["voice_profiles"], 4)
+        self.assertEqual(summary["prosody_variants"], 6)
+        self.assertGreater(summary["negative_base_jobs"], summary["positive_base_jobs"])
+
+    def test_voice_profiles_can_be_loaded_from_local_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "voices.json"
+            path.write_text(json.dumps({
+                "voices": [
+                    {"id": "tsukuyomi", "speaker_id": 0, "model_id": "tsukuyomi-chan-6lang-fp16"},
+                    {"id": "alt", "voice": "ja_JP-alt-medium", "speaker_id": 1, "source_engine": "piper-plus", "model_id": "alt-model"},
+                ]
+            }), encoding="utf-8")
+
+            voices = load_voice_profiles(path)
+
+        self.assertEqual([voice.id for voice in voices], ["tsukuyomi", "alt"])
+        self.assertEqual(voices[0].voice, "ja_JP-tsukuyomi-chan-medium")
+        self.assertEqual(voices[1].speaker_id, 1)
+        self.assertEqual(voices[1].model_id, "alt-model")
 
 
 if __name__ == "__main__":

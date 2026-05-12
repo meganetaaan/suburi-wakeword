@@ -1,0 +1,32 @@
+{
+  "voices": [
+    {
+      "id": "tsukuyomi-speaker0",
+      "voice": "ja_JP-tsukuyomi-chan-medium",
+      "speaker_id": 0,
+      "source_engine": "piper-plus",
+      "model_id": "tsukuyomi-chan-6lang-fp16"
+    },
+    {
+      "id": "tsukuyomi-speaker1",
+      "voice": "ja_JP-tsukuyomi-chan-medium",
+      "speaker_id": 1,
+      "source_engine": "piper-plus",
+      "model_id": "tsukuyomi-chan-6lang-fp16"
+    },
+    {
+      "id": "tsukuyomi-speaker2",
+      "voice": "ja_JP-tsukuyomi-chan-medium",
+      "speaker_id": 2,
+      "source_engine": "piper-plus",
+      "model_id": "tsukuyomi-chan-6lang-fp16"
+    },
+    {
+      "id": "tsukuyomi-speaker3",
+      "voice": "ja_JP-tsukuyomi-chan-medium",
+      "speaker_id": 3,
+      "source_engine": "piper-plus",
+      "model_id": "tsukuyomi-chan-6lang-fp16"
+    }
+  ]
+}

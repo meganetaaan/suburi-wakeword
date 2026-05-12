@@ -67,6 +67,19 @@ PYTHONPATH=src uv run python -m suburi_wakeword.run_smoke_pipeline \
 
 Current dry-run counts for `expanded` with the default verified Tsukuyomi voice/model profile are 125 base TTS jobs before augmentation: 50 positive, 70 negative, and 5 English holdout. Adding more `VoiceProfile`s multiplies those counts without changing the downstream manifest schema.
 
+The recommended first thousands-scale profile is `expanded-5k`. It expects four voice profiles and creates 912 base TTS jobs: 288 positive, 576 negative, and 48 English holdout. With the standard 6x raw+augmentation expansion this is estimated at 5,472 utterances.
+
+```bash
+cd training/pipeline
+PYTHONPATH=src uv run python -m suburi_wakeword.run_smoke_pipeline \
+  --dataset-profile expanded-5k \
+  --voice-profile-config config/voice-profiles.example.json \
+  --dry-run \
+  --output-root runs/dry-run/hai_stackchan_ja_expanded5k
+```
+
+`--dry-run` writes `tts-jobs.jsonl` and `dataset-summary.json` without synthesizing WAVs. Replace `config/voice-profiles.example.json` with a local ignored config once real alternative models/speakers are available.
+
 ## Piper Plus runtime note
 
 The current PyPI `piper` CLI installed from `piper-plus` can list and download Japanese Piper Plus voices, but the 2026 MB-iSTFT Japanese models require `speaker_embedding` inputs. For this smoke pipeline, the command therefore clones `ayutaz/piper-plus` `dev` under `.local-data/tools/piper-plus` and runs:

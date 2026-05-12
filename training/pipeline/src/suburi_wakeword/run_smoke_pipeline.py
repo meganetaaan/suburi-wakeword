@@ -12,7 +12,17 @@ from .augment import AugmentationPlan, augment_manifest_records
 from .dataset_split import assign_splits
 from .microwakeword import MicroWakeWordTrainingConfig, train_microwakeword_smoke_model
 from .threshold_sweep import default_thresholds, sweep_thresholds
-from .tts import build_large_synthetic_jobs, build_smoke_jobs, ensure_tsukuyomi_model, synthesize_job, write_job_manifest
+from .tts import (
+    VoiceProfile,
+    build_expanded_5k_jobs,
+    build_large_synthetic_jobs,
+    build_smoke_jobs,
+    ensure_tsukuyomi_model,
+    load_voice_profiles,
+    summarize_jobs,
+    synthesize_job,
+    write_job_manifest,
+)
 
 
 def ensure_piper_plus_source(path: Path) -> Path:
@@ -56,15 +66,22 @@ def _length_scales_for_count(count: int) -> tuple[float, ...]:
     return tuple(round(float(value), 3) for value in np.linspace(1.1, 1.7, count))
 
 
-def build_jobs_for_profile(profile: str, *, samples_per_variant: int = 1):
+def build_jobs_for_profile(
+    profile: str,
+    *,
+    samples_per_variant: int = 1,
+    voices: tuple[VoiceProfile, ...] = (VoiceProfile(id="tsukuyomi"),),
+):
     if profile == "smoke":
         return build_smoke_jobs(length_scales=_length_scales_for_count(samples_per_variant))
     if profile == "expanded":
-        return build_large_synthetic_jobs()
+        return build_large_synthetic_jobs(voices=voices)
+    if profile == "expanded-5k":
+        return build_expanded_5k_jobs(voices=voices)
     raise ValueError(f"Unknown dataset profile: {profile}")
 
 
-def run(output_root: Path, samples_per_variant: int = 1, dataset_profile: str = "smoke") -> Path:
+def run(output_root: Path, samples_per_variant: int = 1, dataset_profile: str = "smoke", voices: tuple[VoiceProfile, ...] = (VoiceProfile(id="tsukuyomi"),)) -> Path:
     output_root.mkdir(parents=True, exist_ok=True)
     local_tools = Path(".local-data/tools")
     piper_python_dir = ensure_piper_plus_source(local_tools / "piper-plus")
@@ -72,7 +89,7 @@ def run(output_root: Path, samples_per_variant: int = 1, dataset_profile: str = 
 
     raw_audio_root = output_root / "raw"
     normalized_root = output_root / "normalized"
-    jobs = build_jobs_for_profile(dataset_profile, samples_per_variant=samples_per_variant)
+    jobs = build_jobs_for_profile(dataset_profile, samples_per_variant=samples_per_variant, voices=voices)
     write_job_manifest(jobs, raw_audio_root, output_root / "tts-jobs.jsonl")
 
     manifest_records = []
@@ -143,9 +160,20 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-root", type=Path, default=Path("runs/smoke/hai_stackchan_ja"))
     parser.add_argument("--samples-per-variant", type=int, default=1)
-    parser.add_argument("--dataset-profile", choices=("smoke", "expanded"), default="smoke")
+    parser.add_argument("--dataset-profile", choices=("smoke", "expanded", "expanded-5k"), default="smoke")
+    parser.add_argument("--voice-profile-config", type=Path)
+    parser.add_argument("--dry-run", action="store_true", help="Write tts-jobs.jsonl and dataset-summary.json without synthesizing audio.")
     args = parser.parse_args()
-    artifact_dir = run(args.output_root, args.samples_per_variant, args.dataset_profile)
+    voices = load_voice_profiles(args.voice_profile_config) if args.voice_profile_config else (VoiceProfile(id="tsukuyomi"),)
+    if args.dry_run:
+        args.output_root.mkdir(parents=True, exist_ok=True)
+        jobs = build_jobs_for_profile(args.dataset_profile, samples_per_variant=args.samples_per_variant, voices=voices)
+        write_job_manifest(jobs, args.output_root / "raw", args.output_root / "tts-jobs.jsonl")
+        summary = summarize_jobs(jobs, augmentation_multiplier=6)
+        (args.output_root / "dataset-summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return
+    artifact_dir = run(args.output_root, args.samples_per_variant, args.dataset_profile, voices)
     print(artifact_dir)
 
 

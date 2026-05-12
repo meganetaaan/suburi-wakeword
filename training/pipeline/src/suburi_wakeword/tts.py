@@ -4,6 +4,7 @@ import hashlib
 import json
 import subprocess
 import urllib.request
+from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -50,6 +51,28 @@ DEFAULT_EXPANDED_NEGATIVE_TEXTS = (
     "ハイ、スタックはどこですか",
 )
 DEFAULT_HOLDOUT_TEXTS = ("Hi, Stack-chan",)
+DEFAULT_EXPANDED_5K_POSITIVE_TEXTS = (
+    *DEFAULT_EXPANDED_POSITIVE_TEXTS,
+    "ハイー、スタックチャン",
+    "はいー、スタックチャン",
+)
+DEFAULT_EXPANDED_5K_NEGATIVE_TEXTS = (
+    *DEFAULT_EXPANDED_NEGATIVE_TEXTS,
+    "ハイ、スタッフちゃん",
+    "はい、スタッフちゃん",
+    "ハイ、ストックさん",
+    "はい、ストックさん",
+    "ハイ、スタックさん",
+    "はい、スタックさん",
+    "ハイ、スタックチャンネル",
+    "はい、スタックチャンネル",
+    "スタックちゃん、こんにちは",
+    "スタックチャンネルです",
+)
+DEFAULT_EXPANDED_5K_HOLDOUT_TEXTS = (
+    "Hi, Stack-chan",
+    "Hey, Stack-chan",
+)
 
 
 @dataclass(frozen=True)
@@ -67,6 +90,16 @@ class ProsodyVariant:
     length_scale: float
     noise_scale: float = 0.667
     noise_scale_w: float = 0.8
+
+
+DEFAULT_EXPANDED_5K_PROSODY_VARIANTS = (
+    ProsodyVariant(id="fast-flat", length_scale=0.85, noise_scale=0.55, noise_scale_w=0.6),
+    ProsodyVariant(id="fast-default", length_scale=0.95, noise_scale=0.667, noise_scale_w=0.8),
+    ProsodyVariant(id="normal-flat", length_scale=1.1, noise_scale=0.55, noise_scale_w=0.7),
+    ProsodyVariant(id="normal-default", length_scale=1.2, noise_scale=0.667, noise_scale_w=0.8),
+    ProsodyVariant(id="slow-lively", length_scale=1.35, noise_scale=0.8, noise_scale_w=1.05),
+    ProsodyVariant(id="very-slow-varied", length_scale=1.55, noise_scale=0.9, noise_scale_w=1.25),
+)
 
 
 @dataclass(frozen=True)
@@ -219,6 +252,55 @@ def build_large_synthetic_jobs(
         voices=voices,
         prosody_variants=prosody_variants,
     )
+
+
+def build_expanded_5k_jobs(*, voices: Sequence[VoiceProfile]) -> list[TtsJob]:
+    """Build the recommended ~5k utterance plan before real microWakeWord training.
+
+    Counts before augmentation with four voice profiles:
+    12 positive + 24 negative + 2 holdout phrases, times 6 prosody variants,
+    times 4 voices = 912 base TTS jobs. The standard smoke augmentation expands
+    this to an estimated 5,472 utterances.
+    """
+    return build_expanded_jobs(
+        positive_texts=DEFAULT_EXPANDED_5K_POSITIVE_TEXTS,
+        negative_texts=DEFAULT_EXPANDED_5K_NEGATIVE_TEXTS,
+        holdout_texts=DEFAULT_EXPANDED_5K_HOLDOUT_TEXTS,
+        voices=voices,
+        prosody_variants=DEFAULT_EXPANDED_5K_PROSODY_VARIANTS,
+    )
+
+
+def load_voice_profiles(path: Path) -> tuple[VoiceProfile, ...]:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    rows = data.get("voices", data if isinstance(data, list) else None)
+    if not isinstance(rows, list) or not rows:
+        raise ValueError(f"Voice profile config must contain a non-empty voices list: {path}")
+    return tuple(
+        VoiceProfile(
+            id=str(row["id"]),
+            voice=str(row.get("voice", DEFAULT_VOICE)),
+            speaker_id=int(row.get("speaker_id", 0)),
+            source_engine=str(row.get("source_engine", "piper-plus")),
+            model_id=str(row.get("model_id", "tsukuyomi-chan-6lang-fp16")),
+        )
+        for row in rows
+    )
+
+
+def summarize_jobs(jobs: Sequence[TtsJob], *, augmentation_multiplier: int = 1) -> dict:
+    labels = Counter(job.label for job in jobs)
+    return {
+        "base_jobs": len(jobs),
+        "estimated_after_augmentation": len(jobs) * int(augmentation_multiplier),
+        "labels": dict(labels),
+        "positive_base_jobs": labels.get("positive", 0),
+        "negative_base_jobs": labels.get("negative", 0),
+        "holdout_base_jobs": labels.get("holdout", 0),
+        "voice_profiles": len({job.voice_profile_id for job in jobs}),
+        "prosody_variants": len({job.prosody_id for job in jobs}),
+        "texts": len({job.text for job in jobs}),
+    }
 
 
 def ensure_tsukuyomi_model(model_dir: Path) -> tuple[Path, Path]:
