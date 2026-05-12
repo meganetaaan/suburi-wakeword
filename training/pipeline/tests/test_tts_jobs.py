@@ -111,10 +111,10 @@ class TtsJobTests(unittest.TestCase):
                 VoiceProfile(id="voice-d", speaker_id=3),
             ),
         )
-        summary = summarize_jobs(jobs, augmentation_multiplier=6)
+        summary = summarize_jobs(jobs, augmentation_multiplier=7)
 
         self.assertEqual(summary["base_jobs"], 912)
-        self.assertEqual(summary["estimated_after_augmentation"], 5472)
+        self.assertEqual(summary["estimated_after_augmentation"], 6384)
         self.assertEqual(summary["labels"], {"positive": 288, "negative": 576, "holdout": 48})
         self.assertEqual(summary["voice_profiles"], 4)
         self.assertEqual(summary["prosody_variants"], 6)
