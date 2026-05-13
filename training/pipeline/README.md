@@ -67,7 +67,7 @@ PYTHONPATH=src uv run python -m suburi_wakeword.run_smoke_pipeline \
 
 Current dry-run counts for `expanded` with the default verified Tsukuyomi voice/model profile are 125 base TTS jobs before augmentation: 50 positive, 70 negative, and 5 English holdout. Adding more `VoiceProfile`s multiplies those counts without changing the downstream manifest schema.
 
-The recommended first thousands-scale profile is `expanded-5k`. It expects four voice profiles and creates 912 base TTS jobs: 288 positive, 576 negative, and 48 English holdout. With the current raw + augmentation expansion this produces 6,384 utterances. A follow-up profile, `expanded-5k-hard-negatives`, adds targeted Japanese near-miss negatives from false-accept analysis; it creates 1,104 base jobs and 7,728 utterances, but the first real CV run lowered recall too much, so treat it as an experiment to rebalance rather than the default dataset.
+The recommended first thousands-scale profile is `expanded-5k`. It expects four voice profiles and creates 912 base TTS jobs: 288 positive, 576 negative, and 48 English holdout. With the current raw + augmentation expansion this produces 6,384 utterances. Follow-up profiles add targeted negatives for experiments: `expanded-5k-hard-negatives` adds Japanese near-miss continuations from false-accept analysis, while `expanded-5k-lexical-negatives` focuses on non-accept lexical impostors such as `スタッキーちゃん` and `スタックあんちゃん`. The first hard-negative real CV run lowered recall too much, so treat these profiles as rebalance experiments rather than the default dataset.
 
 ```bash
 cd training/pipeline

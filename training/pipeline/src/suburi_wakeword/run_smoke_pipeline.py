@@ -16,6 +16,7 @@ from .tts import (
     VoiceProfile,
     build_expanded_5k_hard_negative_jobs,
     build_expanded_5k_jobs,
+    build_expanded_5k_lexical_negative_jobs,
     build_large_synthetic_jobs,
     build_smoke_jobs,
     ensure_tsukuyomi_model,
@@ -81,6 +82,8 @@ def build_jobs_for_profile(
         return build_expanded_5k_jobs(voices=voices)
     if profile == "expanded-5k-hard-negatives":
         return build_expanded_5k_hard_negative_jobs(voices=voices)
+    if profile == "expanded-5k-lexical-negatives":
+        return build_expanded_5k_lexical_negative_jobs(voices=voices)
     raise ValueError(f"Unknown dataset profile: {profile}")
 
 
@@ -163,7 +166,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-root", type=Path, default=Path("runs/smoke/hai_stackchan_ja"))
     parser.add_argument("--samples-per-variant", type=int, default=1)
-    parser.add_argument("--dataset-profile", choices=("smoke", "expanded", "expanded-5k", "expanded-5k-hard-negatives"), default="smoke")
+    parser.add_argument("--dataset-profile", choices=("smoke", "expanded", "expanded-5k", "expanded-5k-hard-negatives", "expanded-5k-lexical-negatives"), default="smoke")
     parser.add_argument("--voice-profile-config", type=Path)
     parser.add_argument("--dry-run", action="store_true", help="Write tts-jobs.jsonl and dataset-summary.json without synthesizing audio.")
     args = parser.parse_args()

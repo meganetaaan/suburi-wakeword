@@ -140,6 +140,28 @@ class TtsJobTests(unittest.TestCase):
         self.assertIn("ハイ、スタックちゃんと呼びました", negative_texts)
         self.assertIn("はい、スタックちゃん、こんにちは", negative_texts)
 
+    def test_expanded_5k_lexical_negative_profile_uses_non_accept_impostors(self):
+        jobs = build_jobs_for_profile(
+            "expanded-5k-lexical-negatives",
+            voices=(
+                VoiceProfile(id="tsukuyomi"),
+                VoiceProfile(id="tsukuyomi-slow", speaker_id=0),
+                VoiceProfile(id="alt-a", speaker_id=1, model_id="local-alt-a"),
+                VoiceProfile(id="alt-b", speaker_id=2, model_id="local-alt-b"),
+            ),
+        )
+        summary = summarize_jobs(jobs, augmentation_multiplier=7)
+        negative_texts = {job.text for job in jobs if job.label == "negative"}
+
+        self.assertEqual(summary["base_jobs"], 1056)
+        self.assertEqual(summary["estimated_after_augmentation"], 7392)
+        self.assertEqual(summary["labels"], {"positive": 288, "negative": 720, "holdout": 48})
+        self.assertIn("ハイ、スタッキーちゃん", negative_texts)
+        self.assertIn("はい、スタッフさん", negative_texts)
+        self.assertIn("ハイ、スタックあんちゃん", negative_texts)
+        self.assertIn("スタックちゃんのとなり", negative_texts)
+        self.assertNotIn("ハイ、スタックチャンネルを開いて", negative_texts)
+
     def test_voice_profiles_can_be_loaded_from_local_json(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "voices.json"

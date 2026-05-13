@@ -124,6 +124,6 @@ Class weighting is a real lever, but the useful range is narrow:
 
 ## Recommended next run
 
-The targeted hard-negative follow-up is recorded separately in `docs/memo/2026-05-13-expanded5k-hard-negative-iteration.md`. It reduced FAR/sample but hurt recall, so do not keep adding negative weight or hard-negative count. Use `expanded-5k + negative_class_weight=1.25` as the current operating candidate, then rebalance hard-negative data before replacing it.
+The targeted hard-negative follow-up is recorded separately in `docs/memo/2026-05-13-expanded5k-hard-negative-iteration.md`. It reduced FAR/sample but hurt recall, so do not keep adding negative weight or hard-negative count. User feedback: `ハイスタックチャンネル` is close to acceptable, so the next safer experiment is the lexical-impostor profile in `docs/memo/2026-05-13-lexical-negative-profile.md` (`スタッキーちゃん`, `スタッフさん`, `スタックあんちゃん`, inserted/context words). Use `expanded-5k + negative_class_weight=1.25` as the current operating candidate until a rebalanced profile preserves recall better.
 
 Target is not max accuracy. Prefer the operating point that lowers FAR/sample while keeping recall reasonably high, then use false-accept analysis to add/minimize the worst Japanese near-miss clusters.

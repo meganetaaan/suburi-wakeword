@@ -80,6 +80,15 @@ DEFAULT_EXPANDED_5K_HARD_NEGATIVE_TEXTS = (
     "ハイ、スタックちゃん、こんにちは",
     "はい、スタックちゃん、こんにちは",
 )
+DEFAULT_EXPANDED_5K_LEXICAL_NEGATIVE_TEXTS = (
+    *DEFAULT_EXPANDED_5K_NEGATIVE_TEXTS,
+    "ハイ、スタッキーちゃん",
+    "はい、スタッキーちゃん",
+    "ハイ、スタックあんちゃん",
+    "はい、スタックあんちゃん",
+    "スタックちゃんのとなり",
+    "スタックちゃんではありません",
+)
 DEFAULT_EXPANDED_5K_HOLDOUT_TEXTS = (
     "Hi, Stack-chan",
     "Hey, Stack-chan",
@@ -287,6 +296,17 @@ def build_expanded_5k_hard_negative_jobs(*, voices: Sequence[VoiceProfile]) -> l
     return build_expanded_jobs(
         positive_texts=DEFAULT_EXPANDED_5K_POSITIVE_TEXTS,
         negative_texts=DEFAULT_EXPANDED_5K_HARD_NEGATIVE_TEXTS,
+        holdout_texts=DEFAULT_EXPANDED_5K_HOLDOUT_TEXTS,
+        voices=voices,
+        prosody_variants=DEFAULT_EXPANDED_5K_PROSODY_VARIANTS,
+    )
+
+
+def build_expanded_5k_lexical_negative_jobs(*, voices: Sequence[VoiceProfile]) -> list[TtsJob]:
+    """Build expanded-5k plus lexical impostors that should stay non-wake."""
+    return build_expanded_jobs(
+        positive_texts=DEFAULT_EXPANDED_5K_POSITIVE_TEXTS,
+        negative_texts=DEFAULT_EXPANDED_5K_LEXICAL_NEGATIVE_TEXTS,
         holdout_texts=DEFAULT_EXPANDED_5K_HOLDOUT_TEXTS,
         voices=voices,
         prosody_variants=DEFAULT_EXPANDED_5K_PROSODY_VARIANTS,
