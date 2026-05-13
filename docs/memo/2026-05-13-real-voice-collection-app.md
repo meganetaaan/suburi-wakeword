@@ -145,6 +145,43 @@ Start with one speaker to test the pipeline, but do not use that for adoption de
 - Treat public tunnel URLs as temporary and revocable.
 - Stop the server/tunnel when collection is done.
 
+## Preparing recordings for evaluation
+
+Browser uploads are WebM/Opus on Chrome/Android. Decode them to the pipeline's 16 kHz mono PCM WAV manifest format before real microWakeWord evaluation:
+
+```bash
+cd training/pipeline
+PYTHONPATH=src uv run python -m suburi_wakeword.real_voice_collection summarize \
+  data/real-voice/collection/hai-stackchan-real-eval-v1/manifest.jsonl
+
+PYTHONPATH=src uv run python -m suburi_wakeword.real_voice_collection prepare-eval \
+  data/real-voice/collection/hai-stackchan-real-eval-v1/manifest.jsonl \
+  runs/real-voice/hai_stackchan_real_eval_v1_<speaker>_<date>/dataset.jsonl
+```
+
+`prepare-eval` requires `ffmpeg` for WebM/Opus decoding and writes `split: real_holdout` rows with both `audio_path` and `normalized_audio_path` pointing at generated 16 kHz WAV files.
+
+## First collection smoke
+
+The first manual collection produced 38 samples from participant `sskw`:
+
+| label | count |
+| --- | ---: |
+| positive | 14 |
+| negative | 20 |
+| holdout | 2 |
+| ambient | 2 |
+
+Converted eval manifest:
+
+```text
+training/pipeline/runs/real-voice/hai_stackchan_real_eval_v1_sskw_20260513/dataset.jsonl
+```
+
+Audio sanity after conversion: 38/38 WAVs are 16 kHz mono 16-bit PCM; duration range 1.62-4.08 sec; no clipping-like peaks; the two ambient prompts are near-silence as expected.
+
+Existing synthetic-CV operating candidate models do not yet transfer well to this one-speaker real holdout. At their synthetic thresholds, recall is near zero. With a wide threshold sweep, the best `expanded-5k + negative_class_weight=1.25` fold reached recall 0.714 with FAR/sample 0.375 on this tiny real set. Treat this as directional only; collect at least three speakers before changing model selection.
+
 ## Verification performed
 
 Focused tests:
@@ -152,6 +189,7 @@ Focused tests:
 ```bash
 cd training/pipeline
 PYTHONPATH=src uv run python -m unittest tests.test_voice_collection_server -v
+PYTHONPATH=src uv run python -m unittest tests.test_real_voice_collection -v
 ```
 
 Full repo CI:

@@ -13,6 +13,7 @@ __pycache__/
 data/raw/
 data/processed/
 data/real-voice/
+training/pipeline/data/real-voice/
 artifacts/
 runs/
 models/private/
