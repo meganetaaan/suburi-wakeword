@@ -1,0 +1,21 @@
+{
+  "session_name": "hai-stackchan-real-eval-v1",
+  "wake_phrase": "ハイ、スタックちゃん",
+  "instructions": "静かな場所で、画面の文を自然に1回読み上げてください。録音前後に少し間を置くと評価しやすくなります。",
+  "prompts": [
+    { "id": "p001", "label": "positive", "text": "ハイ、スタックちゃん", "repeat": 4 },
+    { "id": "p002", "label": "positive", "text": "はい、スタックちゃん", "repeat": 4 },
+    { "id": "p003", "label": "positive", "text": "ハイスタックちゃん", "repeat": 3 },
+    { "id": "p004", "label": "positive", "text": "ハイ、ｽﾀｯｸﾁｬﾝ", "repeat": 3 },
+    { "id": "n001", "label": "negative", "text": "スタックちゃんと呼びました", "repeat": 3 },
+    { "id": "n002", "label": "negative", "text": "スタックちゃん、こんにちは", "repeat": 3 },
+    { "id": "n003", "label": "negative", "text": "はい、スタックチャンネル", "repeat": 3 },
+    { "id": "n004", "label": "negative", "text": "ハイ、スタックチャンネル", "repeat": 3 },
+    { "id": "n005", "label": "negative", "text": "スタッキーちゃん", "repeat": 2 },
+    { "id": "n006", "label": "negative", "text": "スタッフさん", "repeat": 2 },
+    { "id": "n007", "label": "negative", "text": "スタックあんちゃん", "repeat": 2 },
+    { "id": "n008", "label": "negative", "text": "ねえ、スタックチャンネルを開いて", "repeat": 2 },
+    { "id": "h001", "label": "holdout", "text": "Hi, Stack-chan", "repeat": 2 },
+    { "id": "a001", "label": "ambient", "text": "何も読まずに、2秒ほど周囲の音だけを録音してください", "repeat": 2 }
+  ]
+}

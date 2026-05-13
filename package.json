@@ -8,6 +8,7 @@
     "docs:check": "node scripts/check-docs.mjs",
     "pipeline:test": "cd training/pipeline && PYTHONPATH=src uv run python -m unittest discover -s tests -v",
     "pipeline:smoke": "cd training/pipeline && PYTHONPATH=src uv run python -m suburi_wakeword.run_smoke_pipeline",
+    "voice:collect": "cd training/pipeline && PYTHONPATH=src uv run python -m suburi_wakeword.voice_collection_server --host 0.0.0.0 --port 8787",
     "ci": "pnpm docs:check && pnpm pipeline:test"
   },
   "devDependencies": {}

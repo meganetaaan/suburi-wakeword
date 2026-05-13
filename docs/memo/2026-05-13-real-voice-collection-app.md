@@ -1,0 +1,161 @@
+# 2026-05-13 real voice collection app
+
+## Purpose
+
+Collect consented real voice recordings for evaluation-only wake-word holdout sets before mixing human audio into training.
+
+The app is a small Python stdlib web server:
+
+1. Shows one prompt at a time.
+2. Records microphone audio in the browser with `MediaRecorder`.
+3. Saves each take under a label/prompt directory on the server.
+4. Appends upload metadata to `manifest.jsonl`.
+
+Recorded audio is intentionally ignored by Git under `data/real-voice/`.
+
+## Run locally
+
+From repository root:
+
+```bash
+pnpm voice:collect
+```
+
+Equivalent direct command:
+
+```bash
+cd training/pipeline
+PYTHONPATH=src uv run python -m suburi_wakeword.voice_collection_server \
+  --host 0.0.0.0 \
+  --port 8787 \
+  --output-root data/real-voice/collection
+```
+
+Open:
+
+```text
+http://127.0.0.1:8787/
+```
+
+For temporary external collection, expose the local server with ngrok or a similar tunnel:
+
+```bash
+ngrok http 8787
+```
+
+or, when ngrok is not configured:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8787 --no-autoupdate
+```
+
+Use HTTPS tunnel URLs for phone browsers; microphone recording generally requires a secure context except on localhost.
+
+## Data layout
+
+Default output root:
+
+```text
+training/pipeline/data/real-voice/collection/
+```
+
+Example saved file:
+
+```text
+training/pipeline/data/real-voice/collection/hai-stackchan-real-eval-v1/negative/n005/20260513T120001Z_speaker-01_n005-t01.webm
+```
+
+Manifest:
+
+```text
+training/pipeline/data/real-voice/collection/hai-stackchan-real-eval-v1/manifest.jsonl
+```
+
+Each manifest row includes:
+
+- `recorded_at`
+- `session_name`
+- `participant_id` sanitized for filenames
+- `prompt_id`
+- `take_id`
+- `label`: `positive`, `negative`, `holdout`, or `ambient`
+- `text`
+- `duration_ms`
+- `mime_type`
+- `audio_format`
+- `audio_bytes`
+- `audio_path`
+- `client_started_at`
+- `user_agent`
+
+## Default prompt plan
+
+Built-in plan: `hai-stackchan-real-eval-v1`.
+
+It includes:
+
+- positives: `ハイ、スタックちゃん`, `はい、スタックちゃん`, `ハイスタックちゃん`, `ハイ、ｽﾀｯｸﾁｬﾝ`
+- near-miss negatives: `スタックちゃんと呼びました`, `スタックちゃん、こんにちは`, `はい、スタックチャンネル`, `ハイ、スタックチャンネル`, `スタッキーちゃん`, `スタッフさん`, `スタックあんちゃん`, `ねえ、スタックチャンネルを開いて`
+- English holdout: `Hi, Stack-chan`
+- ambient/no-read prompt
+
+A custom prompt file can be supplied:
+
+```bash
+cd training/pipeline
+PYTHONPATH=src uv run python -m suburi_wakeword.voice_collection_server \
+  --prompts config/real-voice-prompts.example.json
+```
+
+Prompt JSON shape:
+
+```json
+{
+  "session_name": "hai-stackchan-real-eval-v1",
+  "wake_phrase": "ハイ、スタックちゃん",
+  "instructions": "静かな場所で自然に読んでください。",
+  "prompts": [
+    { "id": "p001", "label": "positive", "text": "ハイ、スタックちゃん", "repeat": 4 },
+    { "id": "n001", "label": "negative", "text": "スタッキーちゃん", "repeat": 2 }
+  ]
+}
+```
+
+`repeat` expands to stable take IDs such as `p001-t01`, `p001-t02`.
+
+## Collection guidance
+
+Recommended first pass:
+
+| kind | target |
+| --- | ---: |
+| positive wake phrase variants | 50-100 |
+| accept-ish positive variants | 30-50 |
+| near-miss negative | 100-200 |
+| suffix/context negative | 50-100 |
+| ambient/silence/conversation fragments | 50-100 |
+
+Start with one speaker to test the pipeline, but do not use that for adoption decisions. Aim for at least three speakers before judging thresholds.
+
+## Privacy boundary
+
+- Get explicit consent before sharing the public URL.
+- Do not commit real recordings or manifests.
+- Prefer participant IDs like `speaker-01`, not real names.
+- Treat public tunnel URLs as temporary and revocable.
+- Stop the server/tunnel when collection is done.
+
+## Verification performed
+
+Focused tests:
+
+```bash
+cd training/pipeline
+PYTHONPATH=src uv run python -m unittest tests.test_voice_collection_server -v
+```
+
+Full repo CI:
+
+```bash
+pnpm run ci
+```

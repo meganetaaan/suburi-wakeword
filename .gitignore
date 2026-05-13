@@ -12,6 +12,7 @@ __pycache__/
 .local-data/
 data/raw/
 data/processed/
+data/real-voice/
 artifacts/
 runs/
 models/private/
