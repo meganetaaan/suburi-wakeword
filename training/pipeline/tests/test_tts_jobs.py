@@ -103,12 +103,11 @@ class TtsJobTests(unittest.TestCase):
     def test_expanded_5k_profile_reaches_target_after_augmentation(self):
         jobs = build_jobs_for_profile(
             "expanded-5k",
-            samples_per_variant=1,
             voices=(
-                VoiceProfile(id="voice-a", speaker_id=0),
-                VoiceProfile(id="voice-b", speaker_id=1),
-                VoiceProfile(id="voice-c", speaker_id=2),
-                VoiceProfile(id="voice-d", speaker_id=3),
+                VoiceProfile(id="tsukuyomi"),
+                VoiceProfile(id="tsukuyomi-slow", speaker_id=0),
+                VoiceProfile(id="alt-a", speaker_id=1, model_id="local-alt-a"),
+                VoiceProfile(id="alt-b", speaker_id=2, model_id="local-alt-b"),
             ),
         )
         summary = summarize_jobs(jobs, augmentation_multiplier=7)
@@ -119,6 +118,27 @@ class TtsJobTests(unittest.TestCase):
         self.assertEqual(summary["voice_profiles"], 4)
         self.assertEqual(summary["prosody_variants"], 6)
         self.assertGreater(summary["negative_base_jobs"], summary["positive_base_jobs"])
+
+    def test_expanded_5k_hard_negative_profile_targets_false_accept_clusters(self):
+        jobs = build_jobs_for_profile(
+            "expanded-5k-hard-negatives",
+            voices=(
+                VoiceProfile(id="tsukuyomi"),
+                VoiceProfile(id="tsukuyomi-slow", speaker_id=0),
+                VoiceProfile(id="alt-a", speaker_id=1, model_id="local-alt-a"),
+                VoiceProfile(id="alt-b", speaker_id=2, model_id="local-alt-b"),
+            ),
+        )
+        summary = summarize_jobs(jobs, augmentation_multiplier=7)
+        negative_texts = {job.text for job in jobs if job.label == "negative"}
+
+        self.assertEqual(summary["base_jobs"], 1104)
+        self.assertEqual(summary["estimated_after_augmentation"], 7728)
+        self.assertEqual(summary["labels"], {"positive": 288, "negative": 768, "holdout": 48})
+        self.assertIn("ねえ、スタックチャンネル", negative_texts)
+        self.assertIn("はい、スタックチャンネルを開いて", negative_texts)
+        self.assertIn("ハイ、スタックちゃんと呼びました", negative_texts)
+        self.assertIn("はい、スタックちゃん、こんにちは", negative_texts)
 
     def test_voice_profiles_can_be_loaded_from_local_json(self):
         with tempfile.TemporaryDirectory() as tmp:

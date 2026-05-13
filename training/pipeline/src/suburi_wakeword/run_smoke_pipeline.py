@@ -14,6 +14,7 @@ from .microwakeword import MicroWakeWordTrainingConfig, train_microwakeword_smok
 from .threshold_sweep import default_thresholds, sweep_thresholds
 from .tts import (
     VoiceProfile,
+    build_expanded_5k_hard_negative_jobs,
     build_expanded_5k_jobs,
     build_large_synthetic_jobs,
     build_smoke_jobs,
@@ -78,6 +79,8 @@ def build_jobs_for_profile(
         return build_large_synthetic_jobs(voices=voices)
     if profile == "expanded-5k":
         return build_expanded_5k_jobs(voices=voices)
+    if profile == "expanded-5k-hard-negatives":
+        return build_expanded_5k_hard_negative_jobs(voices=voices)
     raise ValueError(f"Unknown dataset profile: {profile}")
 
 
@@ -160,7 +163,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-root", type=Path, default=Path("runs/smoke/hai_stackchan_ja"))
     parser.add_argument("--samples-per-variant", type=int, default=1)
-    parser.add_argument("--dataset-profile", choices=("smoke", "expanded", "expanded-5k"), default="smoke")
+    parser.add_argument("--dataset-profile", choices=("smoke", "expanded", "expanded-5k", "expanded-5k-hard-negatives"), default="smoke")
     parser.add_argument("--voice-profile-config", type=Path)
     parser.add_argument("--dry-run", action="store_true", help="Write tts-jobs.jsonl and dataset-summary.json without synthesizing audio.")
     args = parser.parse_args()
@@ -169,7 +172,7 @@ def main() -> None:
         args.output_root.mkdir(parents=True, exist_ok=True)
         jobs = build_jobs_for_profile(args.dataset_profile, samples_per_variant=args.samples_per_variant, voices=voices)
         write_job_manifest(jobs, args.output_root / "raw", args.output_root / "tts-jobs.jsonl")
-        summary = summarize_jobs(jobs, augmentation_multiplier=6)
+        summary = summarize_jobs(jobs, augmentation_multiplier=7)
         (args.output_root / "dataset-summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return

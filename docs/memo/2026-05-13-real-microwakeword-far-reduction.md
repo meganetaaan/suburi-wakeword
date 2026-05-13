@@ -124,10 +124,6 @@ Class weighting is a real lever, but the useful range is narrow:
 
 ## Recommended next run
 
-Use `negative_class_weight=1.25` as the temporary baseline and try a targeted hard-negative dataset iteration before further class-weight tuning:
-
-1. Add or upsample more Japanese near-miss negatives around `スタックチャンネル`, `スタックちゃん + suffix`, and `ハイ/はい + スタック + non-wake continuation`.
-2. Re-run the same real 2-fold CV at `negative_class_weight=1.25` and thresholds `0.955` to `0.975`.
-3. Compare specifically against the threshold-`0.965` candidate: recall `0.785`, FAR/sample `0.204`, false accepts `889`, false rejects `433`.
+The targeted hard-negative follow-up is recorded separately in `docs/memo/2026-05-13-expanded5k-hard-negative-iteration.md`. It reduced FAR/sample but hurt recall, so do not keep adding negative weight or hard-negative count. Use `expanded-5k + negative_class_weight=1.25` as the current operating candidate, then rebalance hard-negative data before replacing it.
 
 Target is not max accuracy. Prefer the operating point that lowers FAR/sample while keeping recall reasonably high, then use false-accept analysis to add/minimize the worst Japanese near-miss clusters.

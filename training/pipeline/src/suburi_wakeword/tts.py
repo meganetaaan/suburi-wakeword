@@ -69,6 +69,17 @@ DEFAULT_EXPANDED_5K_NEGATIVE_TEXTS = (
     "スタックちゃん、こんにちは",
     "スタックチャンネルです",
 )
+DEFAULT_EXPANDED_5K_HARD_NEGATIVE_TEXTS = (
+    *DEFAULT_EXPANDED_5K_NEGATIVE_TEXTS,
+    "ねえ、スタックチャンネル",
+    "スタックチャンネルを開いて",
+    "ハイ、スタックチャンネルを開いて",
+    "はい、スタックチャンネルを開いて",
+    "スタックちゃんです",
+    "ハイ、スタックちゃんと呼びました",
+    "ハイ、スタックちゃん、こんにちは",
+    "はい、スタックちゃん、こんにちは",
+)
 DEFAULT_EXPANDED_5K_HOLDOUT_TEXTS = (
     "Hi, Stack-chan",
     "Hey, Stack-chan",
@@ -260,11 +271,22 @@ def build_expanded_5k_jobs(*, voices: Sequence[VoiceProfile]) -> list[TtsJob]:
     Counts before augmentation with four voice profiles:
     12 positive + 24 negative + 2 holdout phrases, times 6 prosody variants,
     times 4 voices = 912 base TTS jobs. The standard smoke augmentation expands
-    this to an estimated 5,472 utterances.
+    this to 6,384 utterances including raw originals.
     """
     return build_expanded_jobs(
         positive_texts=DEFAULT_EXPANDED_5K_POSITIVE_TEXTS,
         negative_texts=DEFAULT_EXPANDED_5K_NEGATIVE_TEXTS,
+        holdout_texts=DEFAULT_EXPANDED_5K_HOLDOUT_TEXTS,
+        voices=voices,
+        prosody_variants=DEFAULT_EXPANDED_5K_PROSODY_VARIANTS,
+    )
+
+
+def build_expanded_5k_hard_negative_jobs(*, voices: Sequence[VoiceProfile]) -> list[TtsJob]:
+    """Build expanded-5k plus targeted hard negatives from real false accepts."""
+    return build_expanded_jobs(
+        positive_texts=DEFAULT_EXPANDED_5K_POSITIVE_TEXTS,
+        negative_texts=DEFAULT_EXPANDED_5K_HARD_NEGATIVE_TEXTS,
         holdout_texts=DEFAULT_EXPANDED_5K_HOLDOUT_TEXTS,
         voices=voices,
         prosody_variants=DEFAULT_EXPANDED_5K_PROSODY_VARIANTS,
