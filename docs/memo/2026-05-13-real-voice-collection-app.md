@@ -87,6 +87,7 @@ Each manifest row includes:
 - `audio_path`
 - `client_started_at`
 - `user_agent`
+- `consent`: accepted flag, terms version, and accepted timestamp
 
 ## Default prompt plan
 
@@ -114,6 +115,17 @@ Prompt JSON shape:
   "session_name": "hai-stackchan-real-eval-v1",
   "wake_phrase": "ハイ、スタックちゃん",
   "instructions": "静かな場所で自然に読んでください。",
+  "consent": {
+    "version": "real-voice-eval-v1",
+    "required": true,
+    "title": "評価用音声の収集について",
+    "items": [
+      "録音データは評価用に保存します。",
+      "まずは評価用として扱い、明示的な追加確認なしに学習には使いません。",
+      "公開リポジトリにはコミットしません。"
+    ],
+    "checkbox_label": "上記を確認し、評価用音声として録音・保存することに同意します。"
+  },
   "prompts": [
     { "id": "p001", "label": "positive", "text": "ハイ、スタックちゃん", "repeat": 4 },
     { "id": "n001", "label": "negative", "text": "スタッキーちゃん", "repeat": 2 }
@@ -139,6 +151,7 @@ Start with one speaker to test the pipeline, but do not use that for adoption de
 
 ## Privacy boundary
 
+- Show the in-app consent dialog before recording; server-side upload rejects recordings without `consent.accepted: true`.
 - Get explicit consent before sharing the public URL.
 - Do not commit real recordings or manifests.
 - Prefer participant IDs like `speaker-01`, not real names.

@@ -10,6 +10,7 @@ from suburi_wakeword.voice_collection_server import (
     build_server,
     default_prompt_plan,
     load_prompt_plan,
+    render_index_html,
     save_recording_upload,
 )
 
@@ -65,6 +66,38 @@ class VoiceCollectionServerTests(unittest.TestCase):
             finally:
                 server.server_close()
 
+    def test_default_prompt_plan_includes_consent_terms(self):
+        plan = default_prompt_plan()
+
+        consent = plan["consent"]
+
+        self.assertIn("評価用音声", consent["title"])
+        self.assertTrue(consent["required"])
+        self.assertIn("学習には使わず", "\n".join(consent["items"]))
+        self.assertIn("同意します", consent["checkbox_label"])
+
+    def test_render_index_html_requires_terms_dialog_before_recording(self):
+        html = render_index_html(default_prompt_plan())
+
+        self.assertIn("consent-dialog", html)
+        self.assertIn("評価用音声の収集について", html)
+        self.assertIn("agree-consent", html)
+        self.assertIn("同意してはじめる", html)
+        self.assertIn("localStorage.getItem('voiceCollectionConsentAccepted')", html)
+
+    def test_save_recording_upload_rejects_missing_consent_acceptance(self):
+        payload = {
+            "participant_id": "User 01 / demo",
+            "prompt": {"id": "n001", "take_id": "n001-t01", "label": "negative", "text": "スタッキーちゃん"},
+            "mime_type": "audio/webm;codecs=opus",
+            "audio_base64": base64.b64encode(b"audio").decode("ascii"),
+            "duration_ms": 1234,
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, "consent"):
+                save_recording_upload(payload, output_root=Path(tmp), now="20260513T120001Z")
+
     def test_save_recording_upload_writes_audio_and_manifest_by_label_and_prompt(self):
         fake_audio = b"not really a wav but upload bytes"
         payload = {
@@ -74,6 +107,7 @@ class VoiceCollectionServerTests(unittest.TestCase):
             "audio_base64": base64.b64encode(fake_audio).decode("ascii"),
             "duration_ms": 1234,
             "client_started_at": "2026-05-13T12:00:00.000Z",
+            "consent": {"accepted": True, "version": "real-voice-eval-v1", "accepted_at": "2026-05-13T12:00:00.000Z"},
         }
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -93,6 +127,8 @@ class VoiceCollectionServerTests(unittest.TestCase):
         self.assertEqual(row["text"], "スタッキーちゃん")
         self.assertEqual(row["duration_ms"], 1234)
         self.assertEqual(row["audio_format"], "webm")
+        self.assertEqual(row["consent"]["version"], "real-voice-eval-v1")
+        self.assertTrue(row["consent"]["accepted"])
 
 
 if __name__ == "__main__":
