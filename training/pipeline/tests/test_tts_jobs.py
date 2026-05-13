@@ -162,6 +162,31 @@ class TtsJobTests(unittest.TestCase):
         self.assertIn("スタックちゃんのとなり", negative_texts)
         self.assertNotIn("ハイ、スタックチャンネルを開いて", negative_texts)
 
+    def test_expanded_5k_substitution_negative_profile_avoids_stackchan_suffix_contexts(self):
+        jobs = build_jobs_for_profile(
+            "expanded-5k-substitution-negatives",
+            voices=(
+                VoiceProfile(id="tsukuyomi"),
+                VoiceProfile(id="tsukuyomi-slow", speaker_id=0),
+                VoiceProfile(id="alt-a", speaker_id=1, model_id="local-alt-a"),
+                VoiceProfile(id="alt-b", speaker_id=2, model_id="local-alt-b"),
+            ),
+        )
+        summary = summarize_jobs(jobs, augmentation_multiplier=7)
+        negative_texts = {job.text for job in jobs if job.label == "negative"}
+
+        self.assertEqual(summary["base_jobs"], 1008)
+        self.assertEqual(summary["estimated_after_augmentation"], 7056)
+        self.assertEqual(summary["labels"], {"positive": 288, "negative": 672, "holdout": 48})
+        self.assertIn("ハイ、スタッキーちゃん", negative_texts)
+        self.assertIn("はい、スタッキーちゃん", negative_texts)
+        self.assertIn("ハイ、スタックあんちゃん", negative_texts)
+        self.assertIn("はい、スタックあんちゃん", negative_texts)
+        self.assertIn("はい、スタッフさん", negative_texts)
+        self.assertNotIn("スタックちゃんのとなり", negative_texts)
+        self.assertNotIn("スタックちゃんではありません", negative_texts)
+        self.assertNotIn("ハイ、スタックチャンネルを開いて", negative_texts)
+
     def test_voice_profiles_can_be_loaded_from_local_json(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "voices.json"
